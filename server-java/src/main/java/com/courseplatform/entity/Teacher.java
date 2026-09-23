@@ -13,6 +13,7 @@ public class Teacher {
     private String teacherNo;
     private String title;
     private String dept;
+    private String phone;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -24,4 +25,6 @@ public class Teacher {
     public void setTitle(String title) { this.title = title; }
     public String getDept() { return dept; }
     public void setDept(String dept) { this.dept = dept; }
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
 }

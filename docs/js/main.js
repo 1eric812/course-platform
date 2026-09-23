@@ -3,7 +3,7 @@
 import { api } from "./api.js";
 import { store, applyPrefs } from "./store.js";
 import { icon, toast, esc } from "./ui.js";
-import { register as registerCountdown, setTarget as setCountdownTarget, onPhase as onCountdownPhase } from "./countdown.js";
+import { register as registerCountdown, setContext as setCountdownContext, setTarget as setCountdownTarget, onPhase as onCountdownPhase, onContext as onCountdownContext, getContext as getCountdownContext } from "./countdown.js";
 import {
   renderDashboard, renderCourses, renderWishlist, renderFlash,
   renderTimetable, renderMessages, renderSettings, renderArch, renderTeacher,
@@ -56,9 +56,26 @@ const ROUTES = {
 
 const TABBAR_KEYS = ["home", "courses", "wishlist", "timetable"];
 
+/**
+ * 把 URL 里的路由片段归一化到 ROUTES 的 key。
+ *
+ * 支持两种写法，避免用户手敲地址时打到不存在的路由：
+ *   #/admin/rules   → adminRules   （多级路径写法）
+ *   #/adminRules    → adminRules   （key 原名写法）
+ * 先把 "/x" 转成驼峰，再回退到原值。
+ */
+function normalizeRoute(h) {
+  if (!h) return h;
+  if (ROUTES[h]) return h;
+  const camel = h.replace(/\/(.)/g, (_, c) => c.toUpperCase());
+  if (ROUTES[camel]) return camel;
+  const lower = h.toLowerCase();
+  return Object.keys(ROUTES).find((k) => k.toLowerCase() === lower) || h;
+}
+
 function currentRoute() {
   const role = store.get().role;
-  const h = location.hash.replace(/^#\//, "") || homeFor(role);
+  const h = normalizeRoute(location.hash.replace(/^#\//, "")) || homeFor(role);
   /* 个人中心对所有角色开放（教师 / 教务也需要退出登录与偏好设置入口） */
   const valid = h === "settings" || navFor(role).some((n) => n.key === h);
   return valid ? h : homeFor(role);
@@ -113,6 +130,7 @@ async function render() {
 /* ---------- 顶部倒计时：交给统一倒计时中心 ---------- */
 let topCdDispose = null;
 let topCdPhaseOff = null;
+let topCdCtxOff = null;
 function startTopCountdown() {
   const node = document.getElementById("topCountdownText");
   if (!node) return;
@@ -122,10 +140,25 @@ function startTopCountdown() {
     const chip = node.closest(".countdown-chip");
     if (chip) chip.dataset.phase = phase;
   });
+  /* 阶段名/关闭态也反映到顶栏提示，避免只显示一个没有语境的数字 */
+  topCdCtxOff = onCountdownContext((ctx) => {
+    const chip = node.closest(".countdown-chip");
+    if (!chip) return;
+    let tip = chip.querySelector(".countdown-tip");
+    if (!tip) {
+      tip = document.createElement("span");
+      tip.className = "countdown-tip";
+      chip.appendChild(tip);
+    }
+    if (ctx.closed) tip.textContent = "通道已关闭";
+    else if (ctx.status === "ONGOING") tip.textContent = `${ctx.phaseName}进行中`;
+    else tip.textContent = `距「${ctx.phaseName}」`;
+  });
 }
 function stopTopCountdown() {
   if (topCdDispose) { topCdDispose(); topCdDispose = null; }
   if (topCdPhaseOff) { topCdPhaseOff(); topCdPhaseOff = null; }
+  if (topCdCtxOff) { topCdCtxOff(); topCdCtxOff = null; }
 }
 
 /* ---------- 全局搜索（含关键词联想 P-02-3） ---------- */
@@ -351,7 +384,8 @@ async function bootApp() {
   try {
     const [prefs, status] = await Promise.all([api.prefs(), api.status()]);
     store.setPrefs(prefs.data);
-    setCountdownTarget(status.data.openAt);
+    /* 顶栏倒计时锚点同样取自 selection_period 阶段表 */
+    setCountdownContext(status.data);
   } catch (e) {
     applyPrefs();
     toast("演示数据加载异常", String((e && e.message) || e), "warn", 3000);

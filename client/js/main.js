@@ -60,9 +60,26 @@ const TABBAR_KEYS = ["home", "courses", "wishlist", "timetable"];
 const BACKEND_HINT = "请确认后端已启动：cd server-java && mvn clean package -DskipTests，"
   + "再执行 java -Dserver.port=8080 -jar target/course-platform-server-1.0.0.jar";
 
+/**
+ * 把 URL 里的路由片段归一化到 ROUTES 的 key。
+ *
+ * 支持两种写法，避免用户手敲地址时打到不存在的路由：
+ *   #/admin/rules   → adminRules   （多级路径写法）
+ *   #/adminRules    → adminRules   （key 原名写法）
+ * 先把 "/x" 转成驼峰，再回退到原值。
+ */
+function normalizeRoute(h) {
+  if (!h) return h;
+  if (ROUTES[h]) return h;
+  const camel = h.replace(/\/(.)/g, (_, c) => c.toUpperCase());
+  if (ROUTES[camel]) return camel;
+  const lower = h.toLowerCase();
+  return Object.keys(ROUTES).find((k) => k.toLowerCase() === lower) || h;
+}
+
 function currentRoute() {
   const role = store.get().role;
-  const h = location.hash.replace(/^#\//, "") || homeFor(role);
+  const h = normalizeRoute(location.hash.replace(/^#\//, "")) || homeFor(role);
   /* 个人中心对所有角色开放（教师 / 教务也需要退出登录与偏好设置入口） */
   const valid = h === "settings" || navFor(role).some((n) => n.key === h);
   return valid ? h : homeFor(role);

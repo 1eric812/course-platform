@@ -1,10 +1,8 @@
 package com.courseplatform.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.courseplatform.config.ServerClock;
-import com.courseplatform.entity.SelectionPeriod;
-import com.courseplatform.mapper.SelectionPeriodMapper;
-import java.time.LocalDateTime;
+import com.courseplatform.entity.SelectionRule;
+import com.courseplatform.mapper.SelectionRuleMapper;
+import com.courseplatform.service.PeriodService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,59 +13,58 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 服务状态 / 架构视图。
  *
- * <p>开放时刻（openAt）统一取自 {@link ServerClock}，与 SSE 推送使用同一时间基准，
- * 保证「抢课倒计时」在学生端各页面看到的是同一个值（需求 I-05 结果与名额的确定性反馈）。
- * 筛选项枚举 {@code GET /api/filters} 由 {@link CourseController} 提供（走 CourseService）。</p>
+ * <p>开放时刻（openAt）与选课阶段（phases）统一由 {@link PeriodService} 从
+ * selection_period 表推导，三端看到的是同一个值（需求 I-05 结果与名额的确定性反馈，
+ * P-01-1 选课节点卡片）。原先这里用的是 {@code ServerClock.openAt()}，即
+ * 「启动时间 + 演示延迟」，与数据库无关，已废弃该口径。</p>
+ *
+ * <p>筛选项枚举 {@code GET /api/filters} 由 {@link CourseController} 提供（走 CourseService）。</p>
  */
 @RestController
 public class MetaController {
 
-    private final ServerClock clock;
-    private final SelectionPeriodMapper periodMapper;
+    private final PeriodService periodService;
+    private final SelectionRuleMapper ruleMapper;
 
-    public MetaController(ServerClock clock, SelectionPeriodMapper periodMapper) {
-        this.clock = clock;
-        this.periodMapper = periodMapper;
+    public MetaController(PeriodService periodService, SelectionRuleMapper ruleMapper) {
+        this.periodService = periodService;
+        this.ruleMapper = ruleMapper;
     }
 
     @GetMapping("/api/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("serverTime", System.currentTimeMillis());
-        m.put("openAt", clock.openAt());
+        /* openAt 为 null 表示阶段表未配置 → 前端不显示倒计时（而不是显示假数字） */
+        m.put("openAt", periodService.openAt());
+        m.put("stages", periodService.phases());
         m.put("categories", List.of("必修", "选修", "通识", "体育"));
-        m.put("phases", phases());
+        m.put("phases", periodService.phases());
+        m.put("selectionOpen", selectionOpen());
         return m;
     }
 
     /**
-     * 选课阶段列表（需求 P-01-1：阶段名称 / 开放起止时间 / 当前所处阶段）。
+     * 选课通道开关（selection_rule.selection_open）。
      *
-     * <p>表未初始化（本地库尚未导入 schema）或查询异常时返回空列表，首页自动隐藏节点卡片，
-     * 不影响倒计时、待办等其它首页信息，保证接口可用性不依赖演示数据是否就绪。</p>
+     * <p>与「是否在阶段窗口内」是两个独立条件：教务可以手动关闸，
+     * 学生端据此把提交按钮置灰并给出说明。查询失败时按「开放」处理，
+     * 避免因配置表缺失而误锁整个选课流程。</p>
      */
-    private List<Map<String, Object>> phases() {
-        List<Map<String, Object>> out = new ArrayList<>();
+    private boolean selectionOpen() {
         try {
-            List<SelectionPeriod> rows = periodMapper.selectList(
-                    new QueryWrapper<SelectionPeriod>().orderByAsc("start_time"));
-            LocalDateTime now = LocalDateTime.now();
-            for (SelectionPeriod p : rows) {
-                boolean ongoing = p.getStartTime() != null && p.getEndTime() != null
-                        && !now.isBefore(p.getStartTime()) && !now.isAfter(p.getEndTime());
-                Map<String, Object> x = new LinkedHashMap<>();
-                x.put("code", p.getPhaseCode());
-                x.put("name", p.getPhaseName());
-                x.put("start", p.getStartTime());
-                x.put("end", p.getEndTime());
-                x.put("status", ongoing ? "ONGOING" : p.getStatus());
-                x.put("current", ongoing);
-                x.put("remark", p.getRemark());
-                out.add(x);
-            }
+            SelectionRule r = ruleMapper.selectById(1L);
+            return r == null || r.getSelectionOpen() == null || r.getSelectionOpen() == 1;
         } catch (Exception e) {
-            return List.of();
+            return true;
         }
+    }
+
+    /** 选课阶段列表（P-01-1：阶段名称 / 开放起止时间 / 当前所处阶段） */
+    @GetMapping("/api/periods")
+    public Map<String, Object> periods() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("items", periodService.phases());
         return out;
     }
 
@@ -79,7 +76,8 @@ public class MetaController {
                 {"POST", "/api/auth/login", "多端密码登录", "auth"},
                 {"POST", "/api/auth/logout", "登出", "auth"},
                 {"GET", "/api/health", "健康检查", "router"},
-                {"GET", "/api/status", "服务状态", "router"},
+                {"GET", "/api/status", "服务状态（含选课阶段与开放时刻）", "router"},
+                {"GET", "/api/periods", "选课阶段时间表", "service"},
                 {"GET", "/api/filters", "筛选项枚举", "service"},
                 {"GET", "/api/courses", "课程列表", "service"},
                 {"GET", "/api/courses/:id", "课程详情", "service"},

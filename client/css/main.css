@@ -560,3 +560,69 @@ select.inp, input.inp { height: 40px; padding: 0 10px; border: 1px solid var(--b
   .filters .f-row { flex-direction: column; gap: 10px; }
   .f-group .inp { width: 100% !important; }
 }
+
+/* ============================================================
+ * 选课阶段（selection_period）相关展示
+ * 抢课专区「阶段进行中 / 教务关闸」提示、倒计时行
+ * ============================================================ */
+
+/* 抢课专区的倒计时行（由 countdown.js 单例驱动） */
+.cd-line {
+  margin-top: 10px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pri);
+  font-weight: 600;
+}
+.cd-line[data-phase="imminent"] { color: var(--danger-t, #dc2626); }
+.cd-line[data-phase="soon"] { color: #ea580c; }
+.cd-line[data-phase="open"] { color: var(--ok); }
+
+/* 教务已关闭选课通道：醒目但克制的提示条 */
+.flash-closed {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 6px 14px; border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger-t, #dc2626);
+  font-size: var(--fs-2); font-weight: 600;
+}
+
+/* 首页选课节点：进行中的阶段加一条左侧强调 */
+.tt-item.phase-current {
+  border-left: 3px solid var(--pri);
+  background: var(--pri-soft);
+  padding-left: 10px;
+  border-radius: var(--r-sm, 6px);
+}
+
+/* ---------- 教务端：选课阶段时间编辑 ---------- */
+.period-edit {
+  border: 1px solid var(--bd);
+  border-radius: var(--r-md);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+}
+.period-edit.ongoing { border-color: var(--pri); background: var(--pri-soft); }
+.period-edit.finished { opacity: .62; }
+.period-edit .pe-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.period-edit .phase-tag {
+  padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
+  background: var(--bg-soft-2, rgba(148,163,184,.16)); color: var(--tx-2);
+}
+.period-edit.ongoing .phase-tag { background: var(--pri); color: #fff; }
+.period-edit .pe-fields {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+}
+.period-edit .pe-fields label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: var(--fs-2); color: var(--tx-2); font-weight: 600;
+}
+.period-edit .pe-fields .inp { min-width: 190px; }
+@media (max-width: 760px) {
+  .period-edit .pe-fields { flex-direction: column; align-items: stretch; }
+  .period-edit .pe-fields .inp { width: 100%; min-width: 0; }
+  .period-edit .pe-fields label { width: 100%; }
+}

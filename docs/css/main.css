@@ -461,3 +461,125 @@ button.demo-item:hover { background: rgba(255,255,255,0.17); border-color: rgba(
   .visual-panel { grid-template-columns: 1fr 1fr; }
   .role-badge { display: none; }
 }
+
+/* ============================================================
+ * 选课阶段（selection_period）相关展示
+ * 首页「选课节点」卡片、抢课专区「阶段时间线」、顶栏阶段提示、通道关闭态
+ * ============================================================ */
+
+/* ---------- 首页：选课节点行 ---------- */
+.phase-row {
+  display: grid;
+  grid-template-columns: 12px 84px 56px 168px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-size: var(--fs-2);
+}
+.phase-row + .phase-row { margin-top: 6px; }
+.phase-row .phase-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--tx-3); justify-self: center;
+}
+.phase-row .phase-name { font-weight: 600; color: var(--tx); }
+.phase-row .phase-span { color: var(--tx-2); font-variant-numeric: tabular-nums; }
+.phase-row .phase-remark { color: var(--tx-3); font-size: var(--fs-3); }
+.phase-row .phase-tag {
+  display: inline-block; text-align: center; padding: 2px 8px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 600; background: var(--bg-soft-2, rgba(148,163,184,.16)); color: var(--tx-2);
+}
+
+/* 进行中：主色高亮 + 左侧强调条 */
+.phase-row.ongoing {
+  border-color: var(--pri);
+  background: var(--pri-soft);
+}
+.phase-row.ongoing .phase-dot { background: var(--pri); box-shadow: 0 0 0 4px var(--pri-soft); }
+.phase-row.ongoing .phase-tag { background: var(--pri); color: #fff; }
+
+/* 已结束：整体降噪 */
+.phase-row.finished { opacity: .58; }
+.phase-row.finished .phase-name { text-decoration: line-through; }
+
+/* 未开始：中性 */
+.phase-row.pending .phase-dot { background: var(--tx-3); }
+
+@media (max-width: 760px) {
+  .phase-row { grid-template-columns: 12px 1fr auto; row-gap: 4px; }
+  .phase-row .phase-span { grid-column: 2 / -1; }
+  .phase-row .phase-remark { grid-column: 2 / -1; }
+}
+
+/* ---------- 抢课专区：阶段时间线 ---------- */
+.pt-list { display: flex; flex-direction: column; gap: 10px; }
+.pt-item {
+  display: flex; gap: 12px; padding: 12px;
+  border: 1px solid var(--bd); border-radius: var(--r-md); background: var(--bg-card);
+}
+.pt-item .pt-dot {
+  flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--bg-soft-2, rgba(148,163,184,.16)); color: var(--tx-2);
+  font-size: 0.75rem; font-weight: 700;
+}
+.pt-item .pt-body { min-width: 0; }
+.pt-item .pt-name { font-weight: 600; color: var(--tx); display: flex; align-items: center; gap: 8px; }
+.pt-item .pt-span { margin-top: 3px; color: var(--tx-2); font-size: var(--fs-3); font-variant-numeric: tabular-nums; }
+.pt-item .pt-remark { margin-top: 3px; color: var(--tx-3); font-size: var(--fs-3); }
+.pt-item.ongoing { border-color: var(--pri); background: var(--pri-soft); }
+.pt-item.ongoing .pt-dot { background: var(--pri); color: #fff; }
+.pt-item.ongoing .phase-tag { background: var(--pri); color: #fff; }
+.pt-item.finished { opacity: .58; }
+.pt-item.finished .pt-name { text-decoration: line-through; }
+
+/* ---------- 教务已关闭通道：抢课专区醒目提示 ---------- */
+.flash-closed {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 6px 14px; border-radius: 999px;
+  background: var(--danger-soft, rgba(239,68,68,.12));
+  color: var(--danger-t, #dc2626); font-size: var(--fs-2); font-weight: 600;
+}
+
+/* ---------- 顶栏阶段提示 ---------- */
+.countdown-chip .countdown-tip {
+  margin-left: 6px; color: var(--tx-3); font-size: 0.72rem; font-weight: 500;
+}
+.countdown-chip[data-phase="open"] .countdown-tip { color: var(--ok, #16a34a); }
+
+/* 深色模式微调 */
+.theme-dark .phase-row.ongoing,
+.theme-dark .pt-item.ongoing { background: var(--pri-soft); }
+
+/* ---------- 教务端：选课阶段时间编辑 ---------- */
+.period-edit {
+  border: 1px solid var(--bd);
+  border-radius: var(--r-md);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+}
+.period-edit.ongoing { border-color: var(--pri); background: var(--pri-soft); }
+.period-edit.ongoing .phase-tag { background: var(--pri); color: #fff; }
+.period-edit.finished { opacity: .62; }
+.period-edit .pe-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.period-edit .phase-tag {
+  padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
+  background: var(--bg-soft-2, rgba(148,163,184,.16)); color: var(--tx-2);
+}
+.period-edit .pe-fields {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+}
+.period-edit .pe-fields label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: var(--fs-2); color: var(--tx-2); font-weight: 600;
+}
+.period-edit .pe-fields .inp { min-width: 190px; }
+@media (max-width: 760px) {
+  .period-edit .pe-fields { flex-direction: column; align-items: stretch; }
+  .period-edit .pe-fields .inp { width: 100%; min-width: 0; }
+  .period-edit .pe-fields label { width: 100%; }
+}

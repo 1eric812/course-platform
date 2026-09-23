@@ -1,6 +1,7 @@
 package com.courseplatform.controller;
 
 import com.courseplatform.service.AdminService;
+import com.courseplatform.service.PeriodService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,9 +21,11 @@ import java.util.Map;
 public class AdminController {
 
     private final AdminService adminService;
+    private final PeriodService periodService;
 
-    public AdminController(AdminService adminService) {
+    public AdminController(AdminService adminService, PeriodService periodService) {
         this.adminService = adminService;
+        this.periodService = periodService;
     }
 
     @GetMapping("/overview")
@@ -38,6 +41,17 @@ public class AdminController {
     @PutMapping("/rules")
     public Map<String, Object> updateRules(@RequestBody Map<String, Object> body) {
         return adminService.updateRules(body);
+    }
+
+    /**
+     * 调整选课阶段起止时间（P-01-1）。
+     *
+     * <p>改完后 /api/status 的 openAt 与 phases 立刻反映新值，
+     * 学生端倒计时无需重启服务即可跟随。</p>
+     */
+    @PutMapping("/periods/{code}")
+    public Map<String, Object> updatePeriod(@PathVariable String code, @RequestBody Map<String, Object> body) {
+        return periodService.updatePeriod(code, body);
     }
 
     @GetMapping("/monitor")

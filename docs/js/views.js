@@ -2,7 +2,7 @@
 
 import { api } from "./api.js";
 import { store } from "./store.js";
-import { register as registerCountdown, unregisterAll as unregisterCountdowns, onPhase as onCountdownPhase, PHASE_LABEL, setTarget as setCountdownTarget } from "./countdown.js";
+import { register as registerCountdown, unregisterAll as unregisterCountdowns, onPhase as onCountdownPhase, onContext as onCountdownContext, PHASE_LABEL, setContext as setCountdownContext } from "./countdown.js";
 import { icon, esc, el, toast, openModal, closeModal, confirmDialog, seatHtml, tagsHtml, scheduleText, pageHead, skeletonList, emptyBox } from "./ui.js";
 
 let timers = [];
@@ -54,20 +54,25 @@ export async function renderDashboard(view) {
   const [status, tt, wish, msgs] = await Promise.all([
     api.status(), api.timetable(), api.wishlist(), api.messages(),
   ]);
-  setCountdownTarget(status.data.openAt);
+  /* 倒计时锚点来自后端 selection_period 阶段表，而不是写死的「页面加载 + 90 秒」 */
+  const ctx = setCountdownContext(status.data);
   store.setWishlist(wish.data.items);
   store.setUnread(msgs.data.items.filter((m) => !m.read).length);
   const c = tt.data;
   const s = store.get();
+  const cdCap = cdCaption(ctx);
 
   view.innerHTML = `
     ${pageHead("首页工作台", "待办、倒计时与快捷入口")}
     <div class="grid g4" style="margin-bottom:14px">
-      <div class="stat"><div class="v" id="dashCountdown">--</div><div class="l">距选课开放</div></div>
+      <div class="stat"><div class="v" id="dashCountdown" data-phase="normal">--</div>
+        <div class="l" id="dashCountdownCap">${esc(cdCap)}</div></div>
       <div class="stat"><div class="v">${c.courses.length}</div><div class="l">已选课程</div></div>
       <div class="stat"><div class="v">${c.totalCredits}</div><div class="l">已选学分（上限 ${s.courses.creditLimit || 30}）</div></div>
       <div class="stat"><div class="v">${wish.data.items.length}</div><div class="l">心愿单待提交</div></div>
     </div>
+
+    ${phaseCard(ctx)}
 
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -103,7 +108,55 @@ export async function renderDashboard(view) {
 
   view.querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => location.hash = "#/" + b.dataset.nav));
   bindCountdown("dashCountdown");
+  /* 阶段切换或教务改了时间时，同步刷新文案（不必整页重渲染） */
+  const offCtx = onCountdownContext((next) => {
+    const cap = view.querySelector("#dashCountdownCap");
+    if (cap) cap.textContent = cdCaption(next);
+    const box = view.querySelector("#phaseCardBody");
+    if (box) box.innerHTML = phaseCardBody(next);
+  });
+  timers.push({ dispose: offCtx });
 }
+
+/** 倒计时下方的说明文案：带阶段名，未设置阶段时给明确提示 */
+function cdCaption(ctx) {
+  if (!ctx) return "距选课开放";
+  if (ctx.closed) return "选课通道已关闭";
+  if (ctx.status === "ONGOING") return `${ctx.phaseName}进行中`;
+  return `距「${ctx.phaseName}」开放`;
+}
+
+/** 选课阶段卡片：把 selection_period 的阶段列表摊开展示（P-01-1） */
+function phaseCard(ctx) {
+  return `<div class="card" style="margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2 style="font-size:var(--fs-h2)">选课节点</h2>
+      <span class="chip" style="font-size:var(--fs-2)">数据源：selection_period</span>
+    </div>
+    <div id="phaseCardBody">${phaseCardBody(ctx)}</div>
+  </div>`;
+}
+
+function phaseCardBody(ctx) {
+  const list = (ctx && ctx.phases) || [];
+  if (!list.length) {
+    return emptyBox("教务尚未设置选课阶段", "请在「选课规则」中配置预选 / 正选 / 补退选时间");
+  }
+  const row = (p) => {
+    const cls = p.current ? "ongoing" : p.status === "FINISHED" ? "finished" : "pending";
+    const tag = p.current ? "进行中" : p.status === "FINISHED" ? "已结束" : "未开始";
+    const span = `${String(p.start || "").slice(5, 16)} ~ ${String(p.end || "").slice(5, 16)}`;
+    return `<div class="phase-row ${cls}">
+      <span class="phase-dot"></span>
+      <span class="phase-name">${esc(p.name)}</span>
+      <span class="phase-tag">${tag}</span>
+      <span class="phase-span">${esc(span)}</span>
+      <span class="phase-remark">${esc(p.remark || "")}</span>
+    </div>`;
+  };
+  return list.map(row).join("");
+}
+
 
 /* 倒计时节点绑定：交给统一倒计时中心驱动，本页切走时自动注销 */
 function bindCountdown(elId) {
@@ -451,23 +504,29 @@ function pollTicket(ticketId, firstTicket) {
 /* ================= 抢课专区 ================= */
 export async function renderFlash(view) {
   view.innerHTML = pageHead("抢课专区", "倒计时 · 实时名额 · 目标监控 · 异常可重试") + skeletonList(2);
+  let ctx = null;
   try {
     const status = await api.status();
-    setCountdownTarget(status.data.openAt);
+    /* 倒计时锚点取自 selection_period 阶段表；拿不到阶段时不显示假倒计时 */
+    ctx = setCountdownContext(status.data);
   } catch (e) { /* 倒计时容忍失败 */ }
 
+  const closed = !!(ctx && ctx.closed);
   view.innerHTML = `
     ${pageHead("抢课专区", "倒计时 · 实时名额 · 目标监控 · 异常可重试")}
     <div class="card" style="text-align:center;padding:22px">
-      <div id="flashCdTip" style="font-size:var(--fs-2);color:var(--tx-2)" data-phase="normal">距选课开放</div>
+      <div id="flashCdTip" style="font-size:var(--fs-2);color:var(--tx-2)" data-phase="normal">${esc(cdCaption(ctx))}</div>
       <div id="flashCd" style="font-size:44px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--pri)" data-phase="normal">--:--</div>
-      <div style="font-size:var(--fs-2);color:var(--tx-3)">名额实时推送，延迟 ≤ 1s</div>
+      <div id="flashCdWindow" style="font-size:var(--fs-2);color:var(--tx-3)">${esc(flashWindowText(ctx))}</div>
+      ${closed ? `<div class="flash-closed">${icon("warn", 16)} 教务已关闭选课通道，暂不受理提交</div>` : ""}
       <div style="margin-top:12px"><button class="btn" id="flashRefresh">${icon("refresh", 18)} 手动刷新名额</button></div>
     </div>
     <div class="card">
       <h2 style="font-size:var(--fs-h2);margin-bottom:10px">名额监控（实时）</h2>
       <div id="flashList">${skeletonList(3)}</div>
-    </div>`;
+    </div>
+    ${phaseTimelineCard(ctx)}`;
+
 
   const listEl = view.querySelector("#flashList");
   const renderList = (items) => {
@@ -518,6 +577,7 @@ export async function renderFlash(view) {
   /* 倒计时交由统一中心驱动，并订阅阶段变化更新提示文案 */
   bindCountdown("flashCd");
   const cdTip = view.querySelector("#flashCdTip");
+  const cdWindow = view.querySelector("#flashCdWindow");
   const offPhase = onCountdownPhase(({ phase }) => {
     if (cdTip) {
       cdTip.textContent = PHASE_LABEL[phase] || "";
@@ -525,6 +585,11 @@ export async function renderFlash(view) {
     }
   });
   timers.push({ dispose: offPhase });
+  const offCtx = onCountdownContext((next) => {
+    if (cdTip) cdTip.textContent = cdCaption(next);
+    if (cdWindow) cdWindow.textContent = flashWindowText(next);
+  });
+  timers.push({ dispose: offCtx });
 
   const offSeats = api.onSeats((payload) => {
     if (payload.type !== "seats") return;
@@ -535,6 +600,35 @@ export async function renderFlash(view) {
     });
   });
   timers.push({ dispose: offSeats });
+}
+
+/** 抢课专区的副标题：优先给阶段区间，其次给延迟说明 */
+function flashWindowText(ctx) {
+  if (!ctx) return "名额实时推送，延迟 ≤ 1s";
+  if (ctx.windowText) return `${ctx.phaseName}窗口 ${ctx.windowText} · 名额实时推送`;
+  return "名额实时推送，延迟 ≤ 1s";
+}
+
+/** 抢课专区的阶段时间线（三阶段一览，当前阶段高亮） */
+function phaseTimelineCard(ctx) {
+  const list = (ctx && ctx.phases) || [];
+  if (!list.length) return "";
+  const items = list.map((p, i) => {
+    const cls = p.current ? "ongoing" : p.status === "FINISHED" ? "finished" : "pending";
+    const tag = p.current ? "进行中" : p.status === "FINISHED" ? "已结束" : "未开始";
+    return `<div class="pt-item ${cls}">
+      <div class="pt-dot">${i + 1}</div>
+      <div class="pt-body">
+        <div class="pt-name">${esc(p.name)} <span class="phase-tag">${tag}</span></div>
+        <div class="pt-span">${esc(String(p.start || "").slice(5, 16))} ~ ${esc(String(p.end || "").slice(5, 16))}</div>
+        ${p.remark ? `<div class="pt-remark">${esc(p.remark)}</div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="card">
+    <h2 style="font-size:var(--fs-h2);margin-bottom:10px">选课阶段时间线</h2>
+    <div class="pt-list">${items}</div>
+  </div>`;
 }
 
 /* ================= 我的课表 ================= */
@@ -998,7 +1092,8 @@ export async function renderAdminDashboard(view) {
 
 export async function renderAdminRules(view) {
   view.innerHTML = pageHead("规则配置", "实时生效，直接影响学生端选课行为") + skeletonList(1);
-  const { data: r } = await api.adminRules();
+  const [{ data: r }, { data: pd }] = await Promise.all([api.adminRules(), api.periods()]);
+  const periods = (pd && pd.items) || [];
 
   const sw = (key, label, desc) => `
     <div class="tt-item" style="align-items:center">
@@ -1010,6 +1105,26 @@ export async function renderAdminRules(view) {
       <div style="flex:1"><b>${label}</b><div style="font-size:var(--fs-2);color:var(--tx-3)">${desc}</div></div>
       <input class="inp" type="number" min="${min}" max="${max}" data-rule="${key}" value="${r[key]}" style="width:96px">
     </div>`;
+
+  /* selection_period 阶段时间编辑：datetime-local 需要 yyyy-MM-ddTHH:mm */
+  const toLocalInput = (v) => String(v || "").slice(0, 16).replace(" ", "T");
+  const periodRow = (p) => {
+    const tag = p.current ? "进行中" : p.status === "FINISHED" ? "已结束" : "未开始";
+    const cls = p.current ? "ongoing" : p.status === "FINISHED" ? "finished" : "pending";
+    return `
+    <div class="period-edit ${cls}" data-period="${p.code}">
+      <div class="pe-head">
+        <b>${esc(p.name)}</b>
+        <span class="phase-tag">${tag}</span>
+        ${p.remark ? `<span style="color:var(--tx-3);font-size:var(--fs-2)">${esc(p.remark)}</span>` : ""}
+      </div>
+      <div class="pe-fields">
+        <label>开始<input class="inp" type="datetime-local" data-p-start value="${toLocalInput(p.start)}"></label>
+        <label>结束<input class="inp" type="datetime-local" data-p-end value="${toLocalInput(p.end)}"></label>
+        <button class="btn sm" data-p-save="${p.code}">${icon("check", 16)} 保存该阶段</button>
+      </div>
+    </div>`;
+  };
 
   view.innerHTML = `
     ${pageHead("规则配置", "实时生效，直接影响学生端选课行为")}
@@ -1024,8 +1139,20 @@ export async function renderAdminRules(view) {
         <button class="btn primary" id="ruleSave">${icon("check", 18)} 保存规则</button>
       </div>
     </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <h2 style="font-size:var(--fs-h2)">选课阶段时间</h2>
+        <span class="tag" style="color:var(--tx-3);font-size:var(--fs-2)">数据源：selection_period</span>
+      </div>
+      <div style="font-size:var(--fs-2);color:var(--tx-3);margin-bottom:12px">
+        这里是学生端倒计时的唯一依据。把某个阶段改到未来，学生端倒计时会立刻跟着变，无需重启服务，也不会出现「页面加载 + 90 秒」那种假倒计时。
+      </div>
+      ${periods.length ? periods.map(periodRow).join("") : emptyBox("尚未配置选课阶段", "阶段表为空时学生端不显示倒计时")}
+    </div>
+
     <div class="callout" style="border-left:4px solid var(--warn);background:var(--warn-soft);padding:12px 16px;border-radius:0 6px 6px 0">
-      <b style="color:var(--warn)">提示　</b>修改后无需重启即可生效：例如把「学分上限」调低，学生端立即按新上限校验；把「选课通道」关闭，学生提交会被拒绝并提示教务已关闭。
+      <b style="color:var(--warn)">提示　</b>修改后无需重启即可生效：把「学分上限」调低，学生端立即按新上限校验；把「选课通道」关闭，学生提交会被拒绝并提示教务已关闭；调整「选课阶段时间」会直接改变学生端看到的倒计时。
     </div>`;
 
   view.querySelector("#ruleSave").onclick = async () => {
@@ -1033,7 +1160,7 @@ export async function renderAdminRules(view) {
     view.querySelectorAll("[data-rule]").forEach((inp) => {
       patch[inp.dataset.rule] = inp.type === "checkbox" ? inp.checked : Number(inp.value);
     });
-    const res = await api.setAdminRules(patch);
+    await api.setAdminRules(patch);
     toast("规则已保存", "已实时生效", "ok");
     renderAdminRules(view);
   };
@@ -1045,6 +1172,20 @@ export async function renderAdminRules(view) {
     renderAdminRules(view);
     refreshBadge();
   };
+  /* 逐个阶段保存：只提交该行的起止时间 */
+  view.querySelectorAll("[data-p-save]").forEach((btn) => (btn.onclick = async () => {
+    const row = btn.closest("[data-period]");
+    const startTime = row.querySelector("[data-p-start]").value;
+    const endTime = row.querySelector("[data-p-end]").value;
+    if (!startTime || !endTime) { toast("时间不完整", "请同时填写开始与结束时间", "warn"); return; }
+    const res = await api.setPeriod(btn.dataset.pSave, {
+      startTime: startTime.replace("T", " "),
+      endTime: endTime.replace("T", " "),
+    });
+    if (res.data.error) { toast("保存失败", res.data.error, "warn"); return; }
+    toast("阶段已更新", "学生端倒计时已按新时间刷新", "ok");
+    renderAdminRules(view);
+  }));
 }
 
 export async function renderAdminMonitor(view) {

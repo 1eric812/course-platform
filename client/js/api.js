@@ -163,6 +163,8 @@ export const api = {
 
   health: () => req("GET", "/api/health"),
   status: () => req("GET", "/api/status"),
+  /* 选课阶段时间表（selection_period 表驱动，倒计时锚点来源） */
+  periods: () => req("GET", "/api/periods"),
   architecture: () => req("GET", "/api/architecture"),
   filters: () => req("GET", "/api/filters"),
   courses: (params) => req("GET", "/api/courses" + (params ? "?" + params : "")),
@@ -199,6 +201,8 @@ export const api = {
   adminOverview: () => req("GET", "/api/admin/overview"),
   adminRules: () => req("GET", "/api/admin/rules"),
   setAdminRules: (patch) => req("PUT", "/api/admin/rules", patch),
+  /* 调整选课阶段起止时间（改完学生端倒计时立刻跟随，无需重启服务） */
+  setPeriod: (code, patch) => req("PUT", `/api/admin/periods/${code}`, patch),
   adminMonitor: () => req("GET", "/api/admin/monitor"),
   adminAnomalies: (status) => req("GET", "/api/admin/anomalies" + (status ? "?status=" + status : "")),
   resolveAnomaly: (id, action) => req("POST", `/api/admin/anomalies/${id}/resolve`, { action }),

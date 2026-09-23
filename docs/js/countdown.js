@@ -8,7 +8,11 @@
  *  3. 可见性感知：标签页隐藏时暂停定时器（省电），恢复时立即补算一次。
  *  4. 自适应格式：按剩余量自动切换 天/时/分/秒 的展示粒度。
  *  5. 分档提醒：剩余 ≤ 1 小时 / ≤ 10 分钟 / ≤ 1 分钟 分别升级视觉强调。
+ *  6. 时间口径来自后端的 selection_period 阶段表（见 phases.js），
+ *     本模块只负责「拿到目标时刻之后怎么显示」，不负责编造时刻。
  */
+
+import { resolveCountdown } from "./phases.js";
 
 const HOUR = 3600 * 1000;
 const MINUTE = 60 * 1000;
@@ -20,6 +24,8 @@ const state = {
   listeners: new Set(),// 状态变化订阅（用于派生 UI，如高亮、文案）
   lastPhase: null,     // 上一次的阶段，用于只在跨档时通知
   lastText: new Map(), // node -> 上次写入的文本，避免无谓的 DOM 写入
+  ctx: null,           // 最近一次 resolveCountdown 的语境（阶段名/区间/关闭态）
+  ctxListeners: new Set(), // 语境变化订阅（阶段切换、教务改时间时刷新文案）
 };
 
 /* 允许通过 globalThis.__CP_COUNTDOWN_INTERVAL__ 调整刷新间隔（测试用） */
@@ -173,6 +179,43 @@ export function setTarget(openAt) {
   if (currentRemaining() > 0) smartPause(); else stopTimer();
 }
 
+/**
+ * 用后端 /api/status 的完整载荷设置倒计时语境。
+ *
+ * 这是推荐的入口：它会同时确定「目标时刻」和「阶段语境」（阶段名、起止区间、
+ * 教务是否关闭了通道），并只在语境真的变化时通知订阅者。
+ * 相比裸 setTarget(openAt)，它不会在阶段表缺失时退化成假倒计时。
+ *
+ * @param {object} statusData  /api/status 的 data
+ * @returns {object} 解析出的语境
+ */
+export function setContext(statusData) {
+  const ctx = resolveCountdown(statusData);
+  const prev = state.ctx;
+  const changed =
+    !prev ||
+    prev.target !== ctx.target ||
+    prev.phaseName !== ctx.phaseName ||
+    prev.status !== ctx.status ||
+    prev.closed !== ctx.closed;
+
+  state.ctx = ctx;
+  setTarget(ctx.target);
+
+  if (changed) state.ctxListeners.forEach((fn) => fn(ctx));
+  return ctx;
+}
+
+/** 当前语境（未设置过则为 null） */
+export function getContext() { return state.ctx; }
+
+/** 订阅语境变化（阶段切换 / 教务改时间 / 通道开关时回调），返回取消函数 */
+export function onContext(fn) {
+  state.ctxListeners.add(fn);
+  if (state.ctx) fn(state.ctx);
+  return () => state.ctxListeners.delete(fn);
+}
+
 export function getTarget() { return state.target; }
 export function getRemaining() { return currentRemaining(); }
 
@@ -207,8 +250,12 @@ export function onPhase(fn) {
 export function unregisterAll() {
   state.nodes.clear();
   state.lastText.clear();
-  state.listeners.clear();   // 页面级订阅（onPhase）随视图销毁一并回收，避免跨页串扰
+  state.listeners.clear();      // 页面级订阅（onPhase）随视图销毁一并回收，避免跨页串扰
+  state.ctxListeners.clear();   // 语境订阅同理，否则旧页面的闭包会持有已卸载的 DOM
 }
+
+/* 阶段语境相关的再导出，方便视图层只 import 一个模块 */
+export { currentPhase, nextPhase, parseTime, windowTextOf, roughEta, statusOf } from "./phases.js";
 
 /** 测试/调试用：立刻同步一次当前剩余量（不等待下一次 tick） */
 export function sync() { paint(); }

@@ -266,9 +266,187 @@ export function recordMetric(path, isError = false) {
   m.byPath[key] = (m.byPath[key] || 0) + 1;
 }
 
+/* ============================================================
+ * 选课阶段时间表（对齐 selection_period 表）与选课规则（selection_rule 表）
+ *
+ * 设计口径与 server-java 保持一致：
+ *  - 阶段与规则是「数据库里的配置」，不是前端写死的常量；
+ *  - openAt（下一个可提交选课的时刻）由阶段表推导，而不是页面加载时间 + 90s；
+ *  - 教务端可在「选课规则」里开着/关着选课开关，学生端据此禁用提交。
+ * ============================================================ */
+
+/**
+ * 相对当前时刻的默认阶段编排（首次进入时按此播种，模拟教务已排好的三个阶段）。
+ *
+ * 注意「正选」的 offsetStart 是 -1h：演示时它**已经开放**，学生可以直接提交选课，
+ * 否则默认进页面就是一个 90 秒倒计时，谁都点不了提交、测试也跑不起来。
+ * 但为了保留「倒计时」这个演示点，这里让正选已经开放、而补退选尚未开始，
+ * 倒计时自然指向「补退选」；同时 config.openDelayMs 仍可通过教务端把阶段
+ * 时间改到未来来复现「未开放」场景。
+ */
+const PERIOD_SEED = [
+  { phaseCode: "PRE", phaseName: "预选", offsetStart: -5 * 86400e3, offsetEnd: -3 * 86400e3, remark: "仅可加入心愿单，不做名额占用" },
+  { phaseCode: "MAIN", phaseName: "正选", offsetStart: -3600e3, offsetEnd: 3 * 86400e3, remark: "按志愿序批量受理，先到先得" },
+  { phaseCode: "ADJUST", phaseName: "补退选", offsetStart: 13 * 86400e3, offsetEnd: 17 * 86400e3, remark: "可退课与补选，逾期不再受理" },
+];
+
+/** "2026-09-25 09:00:00" 形状的本地时间字符串，避免时区带来的显示歧义 */
+function fmtLocal(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function buildPeriods() {
+  const now = Date.now();
+  return PERIOD_SEED.map((p, i) => ({
+    id: i + 1,
+    phaseCode: p.phaseCode,
+    phaseName: p.phaseName,
+    startTime: now + p.offsetStart,
+    endTime: now + p.offsetEnd,
+    remark: p.remark,
+  }));
+}
+
+/* ------------------------------------------------------------------
+ * 阶段表持久化
+ *
+ * 静态版没有服务端进程，periodState 只是 JS 模块内存。教务改了阶段时间，
+ * 学生端一切换账号 / 刷新页面就会重新 import 本模块、重新执行 buildPeriods()，
+ * 改动被悄悄冲掉——用户会认为「教务改的时间根本没生效」。
+ *
+ * 因此把阶段表落到 localStorage（与 cp_session 同样的存法）：
+ * 刷新后按存下来的绝对时间来还原，教务的调整才真的算数。
+ * 存储不可用（隐私模式 / 配额满）时静默降级为纯内存。
+ * ------------------------------------------------------------------ */
+const PERIOD_KEY = "cp_periods";
+
+function loadPeriods() {
+  const fallback = buildPeriods();
+  try {
+    const raw = localStorage.getItem(PERIOD_KEY);
+    if (!raw) return fallback;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved) || !saved.length) return fallback;
+    /* 以种子为骨架，只回填时间与备注，避免旧数据缺字段导致渲染出 undefined */
+    return fallback.map((base) => {
+      const hit = saved.find((s) => s && s.phaseCode === base.phaseCode);
+      if (!hit) return base;
+      return {
+        ...base,
+        startTime: parseTimeInput(hit.startTime) ?? base.startTime,
+        endTime: parseTimeInput(hit.endTime) ?? base.endTime,
+        remark: hit.remark != null ? String(hit.remark) : base.remark,
+      };
+    });
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function savePeriods() {
+  try {
+    localStorage.setItem(PERIOD_KEY, JSON.stringify(periodState.periods));
+  } catch (e) { /* 隐私模式或配额不足：降级为纯内存 */ }
+}
+
+export const periodState = {
+  periods: loadPeriods(),
+};
+
+/** 阶段状态：与 DB status 字段同名，但按当前时刻实时判定（ONGOING 优先于表里的静态值） */
+export function phaseStatusOf(p, now = Date.now()) {
+  if (now > p.endTime) return "FINISHED";
+  if (now >= p.startTime) return "ONGOING";
+  return "NOT_STARTED";
+}
+
+/** 按下标时间排序后的阶段列表 */
+export function sortedPeriods() {
+  return periodState.periods.slice().sort((a, b) => a.startTime - b.startTime);
+}
+
+/** 当前进行中的阶段（没有则 null） */
+export function currentPhase() {
+  const now = Date.now();
+  return sortedPeriods().find((p) => now >= p.startTime && now <= p.endTime) || null;
+}
+
+/** 下一个尚未开始的阶段（没有则 null） */
+export function nextPhase() {
+  const now = Date.now();
+  return sortedPeriods().find((p) => p.startTime > now) || null;
+}
+
+/**
+ * 「选课开放时刻」的唯一口径。
+ *
+ * 优先取进行中阶段的开始时间（已经开放，倒计时归零）；
+ * 否则取下一个未开始阶段的开始时间；
+ * 阶段表被清空时回退到「已开放」，避免前端倒计时永远转圈。
+ */
+export function selectionOpenAt() {
+  const cur = currentPhase();
+  if (cur) return cur.startTime;
+  const nxt = nextPhase();
+  if (nxt) return nxt.startTime;
+  return Date.now();
+}
+
+/** 供 /api/status 输出的阶段视图（附 current 标记，前端直接消费） */
+export function phaseViews() {
+  const now = Date.now();
+  return sortedPeriods().map((p) => {
+    const status = phaseStatusOf(p, now);
+    return {
+      code: p.phaseCode,
+      name: p.phaseName,
+      start: fmtLocal(p.startTime),
+      end: fmtLocal(p.endTime),
+      status,
+      current: status === "ONGOING",
+      remark: p.remark,
+    };
+  });
+}
+
+/**
+ * 把前端传来的时间值转成毫秒时间戳。
+ *
+ * 教务端提交的是 "yyyy-MM-dd HH:mm" / "yyyy-MM-ddTHH:mm" 这类字符串，
+ * 直接 Number() 会得到 NaN；这里统一按本地时间解析，与 fmtLocal 输出对称。
+ */
+function parseTimeInput(v) {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return Number(s);
+  const ts = Date.parse(s.replace(" ", "T"));
+  return Number.isNaN(ts) ? null : ts;
+}
+
+/** 教务端更新阶段起止时间（演示用，允许把阶段拖到当下以观察倒计时） */
+export function updatePeriod(code, patch = {}) {
+  const p = periodState.periods.find((x) => x.phaseCode === code);
+  if (!p) return null;
+  for (const k of ["startTime", "endTime"]) {
+    if (patch[k] == null) continue;
+    const ts = parseTimeInput(patch[k]);
+    if (ts != null) p[k] = ts;
+  }
+  if (patch.remark != null) p.remark = String(patch.remark);
+  if (p.endTime <= p.startTime) p.endTime = p.startTime + 3600e3;
+  savePeriods();
+  return p;
+}
+
 /** 重置演示数据：课程名额恢复初始，当前账号的已选/心愿单/票据清空，指标清零 */
 export function resetDemo() {
   state.courses = buildCourses();
+  periodState.periods = buildPeriods();
+  savePeriods();
   const a = db.state;
   a.enrolledIds = a.user.id === "a1" ? [1, 14, 20] : [];
   a.wishlist = [];

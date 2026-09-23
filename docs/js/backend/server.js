@@ -3,15 +3,29 @@
  * 不再走 HTTP。这样整个选课平台可以纯静态部署（GitHub Pages）。 */
 
 import * as svc from "./service.js";
-import { db, CATEGORIES, adminState } from "./data.js";
+import { db, CATEGORIES, adminState, selectionOpenAt, phaseViews } from "./data.js";
 import { config } from "./config.js";
 
-export const openAt = Date.now() + config.openDelayMs;
+/**
+ * 选课开放时刻（兼容旧引用）。
+ *
+ * 以前这里是 `Date.now() + config.openDelayMs`，即「页面加载后 90 秒开放」——
+ * 一个和数据库毫无关系的假时间。现在改为从 selection_period 阶段表推导：
+ * 有进行中的阶段就取它的开始时间，否则取下一个未开始阶段的开始时间。
+ * 因此教务端调整阶段时间后，倒计时会立刻跟着走。
+ */
+export function currentOpenAt() {
+  return selectionOpenAt();
+}
+
+/** 需要读实时值的场景用这个（快照式读取会与阶段表脱节） */
+export const openAt = { valueOf: () => selectionOpenAt(), toString: () => String(selectionOpenAt()) };
 
 /* ---------- 接口清单（架构视图展示用） ---------- */
 export const API_CATALOG = [
   { method: "GET", path: "/api/health", desc: "健康检查与服务状态", module: "router" },
-  { method: "GET", path: "/api/status", desc: "服务器时间、选课开放时间与倒计时", module: "router" },
+  { method: "GET", path: "/api/status", desc: "服务器时间、选课开放时间、选课阶段与倒计时", module: "router" },
+  { method: "GET", path: "/api/periods", desc: "选课阶段时间表（预选/正选/补退选）", module: "service" },
   { method: "GET", path: "/api/architecture", desc: "接口清单（本表）", module: "router" },
   { method: "GET", path: "/api/filters", desc: "筛选项枚举（类别/校区/考核/学分/上课日/节次/教师）", module: "service" },
   { method: "GET", path: "/api/courses", desc: "课程列表：keyword/category/campus/assessment/credits/days/periods/teacher/onlyNoConflict/onlyAvailable/sort", module: "service" },
@@ -40,6 +54,7 @@ export const API_CATALOG = [
   { method: "GET", path: "/api/admin/overview", desc: "教务总览（课程/容量/满班率/待处理工单）", module: "service" },
   { method: "GET", path: "/api/admin/rules", desc: "读取选课规则", module: "service" },
   { method: "PUT", path: "/api/admin/rules", desc: "更新选课规则（实时生效）", module: "service" },
+  { method: "PUT", path: "/api/admin/periods/:code", desc: "调整选课阶段起止时间 {startTime,endTime}", module: "service" },
   { method: "GET", path: "/api/admin/monitor", desc: "运行监控（请求量/内存/票据）", module: "service" },
   { method: "GET", path: "/api/admin/anomalies", desc: "异常工单列表", module: "service" },
   { method: "POST", path: "/api/admin/anomalies/:id/resolve", desc: "处理工单 {action: force|dismiss}", module: "service" },
@@ -72,7 +87,7 @@ export function startSeatTicker(onSeats) {
     const pool = db.allCourses().filter((c) => c.remaining > 0);
     if (!pool.length) {
       adminState.metrics.sseClients = 1;
-      onSeats({ type: "seats", serverTime: Date.now(), openAt, seats: [] });
+      onSeats({ type: "seats", serverTime: Date.now(), openAt: selectionOpenAt(), seats: [] });
       return;
     }
     const n = 1 + Math.floor(Math.random() * 3);
@@ -82,7 +97,7 @@ export function startSeatTicker(onSeats) {
     }
     adminState.metrics.sseClients = 1;
     onSeats({
-      type: "seats", serverTime: Date.now(), openAt,
+      type: "seats", serverTime: Date.now(), openAt: selectionOpenAt(),
       seats: db.allCourses().map((c) => ({ id: c.id, remaining: c.remaining, capacity: c.capacity })),
     });
   }, config.seatTickMs);
@@ -97,10 +112,22 @@ export async function handleApi(method, pathname, query = {}, body = {}) {
   recordMetric(path);
   const q = query;
 
-  if (path === "/api/stream/seats") return ok({ type: "hello", serverTime: Date.now(), openAt });
+  if (path === "/api/stream/seats") return ok({ type: "hello", serverTime: Date.now(), openAt: selectionOpenAt() });
   if (path === "/api/health") return ok({ ok: true, service: "course-selection", uptime: 0 });
-  if (path === "/api/status") return ok({ serverTime: Date.now(), openAt, categories: CATEGORIES });
+  if (path === "/api/status") {
+    /* 与 server-java 的 MetaController#status 返回结构保持一致：
+     * 前端两端共用同一套消费逻辑（phases 里的 current 决定「进行中」标记，
+     * selectionOpen 决定提交按钮是否可用，serverTime 用于校准客户端时钟偏移）。 */
+    return ok({
+      serverTime: Date.now(),
+      openAt: selectionOpenAt(),
+      categories: CATEGORIES,
+      phases: phaseViews(),
+      selectionOpen: adminState.rules.selectionOpen !== false,
+    });
+  }
   if (path === "/api/architecture") return ok({ endpoints: API_CATALOG });
+  if (path === "/api/periods") return ok({ items: phaseViews() });
   if (path === "/api/filters") return ok(svc.filterOptions());
 
   if (path === "/api/courses" && method === "GET") return ok(svc.listCourses(q));
@@ -166,6 +193,11 @@ export async function handleApi(method, pathname, query = {}, body = {}) {
   if (path === "/api/admin/overview" && method === "GET") return ok(svc.adminOverview());
   if (path === "/api/admin/rules" && method === "GET") return ok(svc.getRules());
   if (path === "/api/admin/rules" && method === "PUT") return ok(svc.updateRules(body));
+  const periodM = path.match(/^\/api\/admin\/periods\/([A-Z]+)$/);
+  if (periodM && method === "PUT") {
+    const r = svc.updatePeriod(periodM[1], body);
+    return r.error ? bad(r) : ok(r);
+  }
   if (path === "/api/admin/monitor" && method === "GET") return ok(svc.adminMonitor());
   if (path === "/api/admin/anomalies" && method === "GET") return ok({ items: svc.adminAnomalies(q.status) });
   const resolveM = path.match(/^\/api\/admin\/anomalies\/(\d+)\/resolve$/);

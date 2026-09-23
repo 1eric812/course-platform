@@ -1,6 +1,6 @@
 /* 后端 · 业务服务层：筛选、冲突检测、心愿单、选课受理 */
 
-import { db, CATEGORIES, currentTeacher, genRoster, adminState, resetDemo } from "./data.js";
+import { db, CATEGORIES, currentTeacher, genRoster, adminState, resetDemo, phaseViews, updatePeriod as applyPeriod, currentPhase, nextPhase } from "./data.js";
 import { config } from "./config.js";
 
 // 静态版：浏览器没有 process，用模块加载时刻代替进程启动时刻
@@ -9,6 +9,13 @@ const uptimeSec = () => Math.floor((Date.now() - BOOT_AT) / 1000);
 
 const DAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"];
 const CATEGORY_ORDER = ["必修", "选修", "通识", "体育"];
+
+/** 阶段时间的中文短格式，用于「将于 X 开放」这类提示语 */
+function fmtPhaseTime(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 /* ---------------- 冲突检测 ---------------- */
 
@@ -191,6 +198,16 @@ export function submitSelection() {
   const wish = db.wishlist();
   if (!wish.length) return { error: "心愿单为空，请先添加课程" };
   if (!adminState.rules.selectionOpen) return { error: "选课未开放（教务已暂时关闭选课通道）" };
+  /* 阶段窗口门禁：教务关着开关、或当前时刻不在任何阶段内，都不受理提交。
+   * 与 server-java 的 StudentService#submitSelection 保持同一套判断口径。 */
+  if (!currentPhase()) {
+    const nxt = nextPhase();
+    return {
+      error: nxt
+        ? `当前不在选课阶段内，「${nxt.phaseName}」将于 ${fmtPhaseTime(nxt.startTime)} 开放`
+        : "当前不在选课阶段内，请等待教务安排选课时间",
+    };
+  }
   const ticketId = "TK" + db.state.seq.ticket++;
   // I-05 四态：已受理 → 处理中 → 成功/失败；并给出排队位次
   const queuePos = Object.values(db.state.tickets).filter((t) => t.status === "已受理" || t.status === "处理中").length + 1;
@@ -441,6 +458,25 @@ export function adminOverview() {
 
 export function getRules() {
   return adminState.rules;
+}
+
+/* ---------------- 选课阶段（selection_period） ---------------- */
+
+/** 阶段时间表：含 status / current 标记，供学生端首页与抢课专区展示 */
+export function listPeriods() {
+  return { items: phaseViews() };
+}
+
+/**
+ * 教务端调整某阶段的起止时间。
+ *
+ * 改完之后 openAt 会跟着变（openAt 由阶段表推导），学生端下次轮询
+ * /api/status 就能看到新的倒计时，不需要重启服务。
+ */
+export function updatePeriod(code, patch = {}) {
+  const p = applyPeriod(String(code).toUpperCase(), patch);
+  if (!p) return { error: `阶段不存在：${code}` };
+  return { ok: true, phase: phaseViews().find((x) => x.code === p.phaseCode) || null, items: phaseViews() };
 }
 
 export function updateRules(patch = {}) {

@@ -3,7 +3,7 @@
  * 而是直接调用内置的浏览器端「后端」（js/backend/server.js）。
  * 这样整套选课平台可以零依赖部署在 GitHub Pages 这类纯静态托管上。 */
 
-import { handleApi, startSeatTicker, openAt } from "./backend/server.js";
+import { handleApi, startSeatTicker, openAt, currentOpenAt } from "./backend/server.js";
 
 const log = [];
 const logListeners = new Set();
@@ -59,6 +59,8 @@ export const api = {
 
   health: () => req("GET", "/api/health"),
   status: () => req("GET", "/api/status"),
+  /* 选课阶段时间表（selection_period 表驱动，倒计时锚点来源） */
+  periods: () => req("GET", "/api/periods"),
   architecture: () => req("GET", "/api/architecture"),
   filters: () => req("GET", "/api/filters"),
   courses: (params) => req("GET", "/api/courses" + (params ? "?" + params : "")),
@@ -104,6 +106,7 @@ export const api = {
   adminOverview: () => req("GET", "/api/admin/overview"),
   adminRules: () => req("GET", "/api/admin/rules"),
   setAdminRules: (patch) => req("PUT", "/api/admin/rules", patch),
+  setPeriod: (code, patch) => req("PUT", `/api/admin/periods/${code}`, patch),
   adminMonitor: () => req("GET", "/api/admin/monitor"),
   adminAnomalies: (status) => req("GET", "/api/admin/anomalies" + (status ? "?status=" + status : "")),
   resolveAnomaly: (id, action) => req("POST", `/api/admin/anomalies/${id}/resolve`, { action }),
@@ -111,4 +114,6 @@ export const api = {
   adminReset: () => req("POST", "/api/admin/reset", {}),
 };
 
-export { openAt };
+/* openAt 兼容导出（历史引用）；新代码应调用 currentOpenAt() 取实时值，
+ * 因为它由 selection_period 阶段表推导，会随教务调整而变化。 */
+export { openAt, currentOpenAt };

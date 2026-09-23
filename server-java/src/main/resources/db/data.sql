@@ -257,7 +257,7 @@ INSERT INTO selection_rule (id, selection_open, credit_limit, max_wishlist, allo
 -- ---------- 13. 选课阶段 selection_period（P-01-1 阶段名称与倒计时；正式选课按消息约定 9 月 25 日 09:00 开放） ----------
 INSERT INTO selection_period (phase_code, phase_name, start_time, end_time, status, remark) VALUES
   ('PRE',    '预选',   '2026-09-18 09:00:00', '2026-09-20 23:59:59', 'FINISHED',    '仅可加入心愿单，不做名额占用'),
-  ('MAIN',   '正选',   '2026-09-25 09:00:00', '2026-09-28 23:59:59', 'NOT_STARTED', '按志愿序批量受理，先到先得'),
+  ('MAIN',   '正选',   '2026-09-21 09:00:00', '2026-09-28 23:59:59', 'ONGOING',     '按志愿序批量受理，先到先得'),
   ('ADJUST', '补退选', '2026-10-08 09:00:00', '2026-10-12 23:59:59', 'NOT_STARTED', '可退课与补选，逾期不再受理');
 
 -- ---------- 14. 异常工单 anomaly_ticket（对应 data.js adminState.anomalies 3 条） ----------
@@ -271,6 +271,96 @@ INSERT INTO selection_ticket (id, ticket_no, student_id, status, queue_position,
   (1, 'T-20260919-1001', 2, 'SUCCESS', NULL, 1, 1, 0, '2026-09-19 14:32:00', '2026-09-19 14:32:02');
 INSERT INTO selection_ticket_item (ticket_id, course_id, course_name, result, reason) VALUES
   (1, 15, '高等数学（下）', 'ACCEPTED', NULL);
+
+-- =====================================================================
+-- v2.0 完整版新增数据：学期 / 成绩 / 培养方案 / 公告 / 日志 / 字段补齐
+-- =====================================================================
+
+-- ---------- 16. 学期信息 semester（2 个历史归档学期 + 1 个当前学期） ----------
+INSERT INTO semester (id, academic_year, semester_no, name, is_current, start_date, end_date, selection_start, selection_end, drop_deadline, grade_deadline, archived, remark) VALUES
+  (1, '2025-2026', 1, '2025-2026-1', 0, '2025-09-01', '2026-01-15', '2025-09-05 09:00:00', '2025-09-20 23:59:59', '2025-10-15 23:59:59', '2026-01-20 23:59:59', 1, '历史学期，已归档'),
+  (2, '2025-2026', 2, '2025-2026-2', 0, '2026-02-23', '2026-07-10', '2026-02-27 09:00:00', '2026-03-15 23:59:59', '2026-04-10 23:59:59', '2026-07-15 23:59:59', 1, '历史学期，已归档'),
+  (3, '2026-2027', 1, '2026-2027-1', 1, '2026-09-01', '2027-01-15', '2026-09-25 09:00:00', '2026-09-28 23:59:59', '2026-10-12 23:59:59', '2027-01-20 23:59:59', 0, '当前学期');
+
+-- ---------- 17. 补齐 student 学业字段（学院/学制/入学/学业学分绩点，模拟真实大三大四学生） ----------
+UPDATE student SET
+  college = '信息工程学院', edu_system = '四年', enrollment_date = '2023-09-01', graduation_date = '2027-06-30', phone = '13800000001', study_status = '在读',
+  current_selected_credits = 10.0, current_earned_credits = 0.0, total_earned_credits = 92.0,
+  required_earned_credits = 62.0, elective_earned_credits = 22.0, gen_edu_earned_credits = 8.0,
+  failed_credits = 2.0, total_gpa = 3.2, avg_gpa = 3.2
+WHERE id = 1;
+UPDATE student SET
+  college = '艺术设计学院', edu_system = '四年', enrollment_date = '2024-09-01', graduation_date = '2028-06-30', phone = '13800000002', study_status = '在读',
+  current_selected_credits = 8.0, current_earned_credits = 0.0, total_earned_credits = 46.0,
+  required_earned_credits = 30.0, elective_earned_credits = 12.0, gen_edu_earned_credits = 4.0,
+  failed_credits = 0.0, total_gpa = 3.6, avg_gpa = 3.6
+WHERE id = 2;
+UPDATE student SET
+  college = '理学院', edu_system = '四年', enrollment_date = '2023-09-01', graduation_date = '2027-06-30', phone = '13800000003', study_status = '在读',
+  current_selected_credits = 0.0, current_earned_credits = 0.0, total_earned_credits = 84.0,
+  required_earned_credits = 58.0, elective_earned_credits = 18.0, gen_edu_earned_credits = 8.0,
+  failed_credits = 1.0, total_gpa = 3.0, avg_gpa = 3.0
+WHERE id = 3;
+
+-- ---------- 18. 补齐 course 完整字段（学时/周次/学期/课程属性/状态/详情） ----------
+UPDATE course SET
+  semester_id = 3, weeks = '1-16周', course_status = '选课中',
+  total_hours = credits * 16, theory_hours = credits * 12, practice_hours = credits * 3, lab_hours = credits * 1,
+  course_attr = CASE WHEN category IN ('必修','通识必修','实践课','体育课') THEN '主修课' WHEN category = '体育' THEN '主修课' ELSE '主修课' END,
+  assessment_detail = CASE WHEN assessment = '考试' THEN '平时30% + 期末70%' WHEN assessment = '论文' THEN '平时40% + 论文60%' WHEN assessment = '考查' THEN '平时50% + 考查50%' ELSE '平时50% + 期末50%' END,
+  open_college = '教务处',
+  syllabus = CONCAT('《', name, '》课程大纲：第一章 课程导论；第二章 核心概念；第三章 原理与方法；第四章 综合应用；第五章 课程总结与考核说明。'),
+  course_objective = CONCAT('通过本课程学习，学生应掌握《', name, '》的基本理论、方法与工具，具备独立分析与解决相关实际问题的能力。'),
+  textbook = CONCAT('《', name, '》（第2版），高等教育出版社'),
+  prereq_requirement = CASE WHEN prereq_name IS NULL THEN '无' ELSE CONCAT('需先修：', prereq_name) END,
+  applicable_major = CASE WHEN category IN ('必修') THEN '本专业全部学生' WHEN category IN ('通识') THEN '全校各专业' ELSE '相关专业学生' END;
+UPDATE course SET category = '通识必修' WHERE category = '通识';
+UPDATE course SET category = '实践课' WHERE code IN ('PH102','PH101');
+UPDATE course SET category = '体育课' WHERE category = '体育';
+
+-- ---------- 19. 补齐 course_schedule 学期与教室 ----------
+UPDATE course_schedule cs JOIN course c ON cs.course_id = c.id SET cs.semester_id = 3, cs.place = c.place;
+
+-- ---------- 20. 补齐 student_course 学期与选课类型 ----------
+UPDATE student_course SET semester_id = 3, select_type = '正常选课', status = 'STUDYING';
+
+-- ---------- 21. 补齐 selection_rule 完整版字段 ----------
+UPDATE selection_rule SET
+  max_courses = 10, drop_deadline = '2026-10-12 23:59:59',
+  check_conflict = 1, check_prereq = 1, check_grade_major = 1,
+  allow_retake = 1, allow_cross_major = 0;
+
+-- ---------- 22. 学生成绩 score（历史学期归档成绩 + 当前学期待录入占位） ----------
+-- 学生1（2023级 计算机）历史成绩：2025-2026-1 / 2025-2026-2
+INSERT INTO score (student_id, course_id, semester_id, regular_score, attendance_score, homework_score, midterm_score, final_score, total_score, grade_level, credit_obtained, course_gpa, retake_flag, retake_course_flag, status) VALUES
+  (1, 15, 1, 88, 90, 85, 82, 86, 86.0, '良', 1, 3.5, 0, 0, '已归档'),   -- 高等数学（下）
+  (1, 16, 1, 90, 92, 88, 85, 89, 89.0, '优', 1, 4.0, 0, 0, '已归档'),   -- 线性代数
+  (1, 1, 2, 78, 80, 75, 70, 76, 76.0, '中', 1, 2.0, 1, 0, '已归档'),    -- 数据结构与算法（曾补考）
+  (1, 17, 2, 60, 65, 62, 55, 58, 58.0, '不及格', 0, 0.0, 0, 1, '已归档'), -- 概率论（挂科重修中）
+  (1, 26, 2, 92, 90, 88, 0, 0, 90.0, '优', 1, 4.0, 0, 0, '已归档');     -- 中国古代文学（考查课）
+-- 学生2（2024级 视觉传达）历史成绩
+INSERT INTO score (student_id, course_id, semester_id, regular_score, attendance_score, homework_score, midterm_score, final_score, total_score, grade_level, credit_obtained, course_gpa, retake_flag, retake_course_flag, status) VALUES
+  (2, 16, 1, 95, 98, 90, 88, 92, 92.0, '优', 1, 4.0, 0, 0, '已归档'),
+  (2, 28, 2, 85, 80, 88, 0, 0, 84.0, '良', 1, 3.0, 0, 0, '已归档');
+-- 学生3（2023级 数学）历史成绩
+INSERT INTO score (student_id, course_id, semester_id, regular_score, attendance_score, homework_score, midterm_score, final_score, total_score, grade_level, credit_obtained, course_gpa, retake_flag, retake_course_flag, status) VALUES
+  (3, 15, 1, 75, 80, 70, 68, 72, 72.0, '中', 1, 2.0, 0, 0, '已归档'),
+  (3, 18, 2, 55, 60, 50, 45, 52, 52.0, '不及格', 0, 0.0, 0, 1, '已归档'); -- 离散数学挂科重修
+
+-- ---------- 23. 培养方案 training_plan（计算机科学与技术 2023级 当前学期） ----------
+INSERT INTO training_plan (major, grade, semester_id, required_courses, elective_courses, min_credits, max_credits, grad_total_credits, grad_required_credits, grad_elective_credits, gen_edu_credits, remark) VALUES
+  ('计算机科学与技术', '2023级', 3, '1,2,3,4,16', '5,6,7,8,9,10,11,12,13,14,15,17,18,19', 15.0, 30.0, 120.0, 80.0, 30.0, 10.0, '2023级计算机科学与技术培养方案（当前学期）');
+
+-- ---------- 24. 公告 announcement（教务发布） ----------
+INSERT INTO announcement (title, content, publisher_id, is_pinned, status, published_at) VALUES
+  ('2026-2027 学年第一学期选课通知', '本学期正式选课将于 9 月 25 日 09:00 开放，9 月 28 日 23:59 截止；补退选阶段为 10 月 8 日至 10 月 12 日。请同学们提前核对培养方案与个人培养计划，逾期不再受理。', 42, 1, 'PUBLISHED', '2026-09-20 08:00:00'),
+  ('关于成绩录入与审核的说明', '本学期成绩录入截止时间为 2027 年 1 月 20 日。教师录入后须经教务审核方可生效，审核通过的成绩将自动结算学分与绩点并入档。', 42, 0, 'PUBLISHED', '2026-09-20 08:30:00');
+
+-- ---------- 25. 操作日志 operation_log（审计示例） ----------
+INSERT INTO operation_log (user_id, username, action, target, detail, ip, created_at) VALUES
+  (42, 'admin', '学期创建', '2026-2027-1', '创建当前学期并设置选课时间窗口', '127.0.0.1', '2026-09-01 09:00:00'),
+  (42, 'admin', '学期归档', '2025-2026-2', '归档历史学期成绩、学分、课表数据', '127.0.0.1', '2026-08-30 17:00:00'),
+  (42, 'admin', '成绩审核', 'score', '审核通过学生成绩共 8 条', '127.0.0.1', '2026-07-10 15:30:00');
 
 COMMIT;
 

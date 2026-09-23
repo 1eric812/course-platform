@@ -85,9 +85,9 @@ export async function renderDashboard(view) {
         <span class="tag" style="color:${cur && cur.current ? "var(--ok)" : "var(--tx-3)"}">${esc(cur ? cur.name + (cur.current ? " 进行中" : " 待开始") : "待开放")}</span>
       </div>
       ${phases.map((x) => `
-        <div class="tt-item">
+        <div class="tt-item${x.current ? " phase-current" : ""}">
           <span class="p">${fmtPeriod(x)}</span>
-          <span><b>${esc(x.name)}</b>${x.current ? ' <span style="color:var(--ok)">进行中</span>' : ""}<br><span style="color:var(--tx-3)">${esc(x.remark || "按阶段说明执行")}</span></span>
+          <span><b>${esc(x.name)}</b>${x.current ? ' <span style="color:var(--ok)">进行中</span>' : x.status === "FINISHED" ? ' <span style="color:var(--tx-3)">已结束</span>' : ' <span style="color:var(--tx-3)">未开始</span>'}<br><span style="color:var(--tx-3)">${esc(x.remark || "按阶段说明执行")}</span></span>
         </div>`).join("")}
     </div>` : ""}
 
@@ -565,10 +565,13 @@ function pollTicket(ticketId, firstTicket) {
 export async function renderFlash(view) {
   view.innerHTML = pageHead("抢课专区", "时间状态 · 实时名额 · 目标监控 · 异常可重试") + skeletonList(2);
   let currentPhase = null;
+  let selectionOpen = true;
   try {
     const status = await api.status();
     const phases = status.data.phases || [];
     currentPhase = phases.find((x) => x.current) || phases.find((x) => x.status !== "FINISHED") || null;
+    /* 教务手动关闸与「不在阶段窗口内」是两个独立条件，这里读后端下发的开关 */
+    selectionOpen = status.data.selectionOpen !== false;
     store.get().openAt = status.data.openAt;
   } catch (e) { /* 选课状态接口可容忍失败 */ }
 
@@ -582,6 +585,7 @@ export async function renderFlash(view) {
       <div style="font-size:36px;font-weight:600;line-height:1.2;margin:8px 0;color:var(--pri)">${esc(phaseText)}</div>
       <div style="font-size:var(--fs-2);color:var(--tx-3)">${esc(phaseSpan)}</div>
       <div id="flashCd" class="cd-line" aria-live="polite"></div>
+      ${selectionOpen ? "" : `<div class="flash-closed">${icon("warn", 16)} 教务已关闭选课通道，暂不受理提交</div>`}
       <div style="margin-top:12px"><button class="btn" id="flashRefresh">${icon("refresh", 18)} 手动刷新名额</button></div>
     </div>
     <div class="card">
@@ -1150,7 +1154,8 @@ export async function renderAdminDashboard(view) {
 
 export async function renderAdminRules(view) {
   view.innerHTML = pageHead("规则配置", "实时生效，直接影响学生端选课行为") + skeletonList(1);
-  const { data: r } = await api.adminRules();
+  const [{ data: r }, { data: pd }] = await Promise.all([api.adminRules(), api.periods()]);
+  const periods = (pd && pd.items) || [];
 
   const sw = (key, label, desc) => `
     <div class="tt-item" style="align-items:center">
@@ -1162,6 +1167,26 @@ export async function renderAdminRules(view) {
       <div style="flex:1"><b>${label}</b><div style="font-size:var(--fs-2);color:var(--tx-3)">${desc}</div></div>
       <input class="inp" type="number" min="${min}" max="${max}" data-rule="${key}" value="${r[key]}" style="width:96px">
     </div>`;
+
+  /* P-01-1 选课阶段时间：localDateTime 直接喂给 datetime-local（格式 yyyy-MM-ddTHH:mm） */
+  const toLocalInput = (v) => String(v || "").slice(0, 16).replace(" ", "T");
+  const periodRow = (p) => {
+    const tag = p.current ? "进行中" : p.status === "FINISHED" ? "已结束" : "未开始";
+    const cls = p.current ? "ongoing" : p.status === "FINISHED" ? "finished" : "pending";
+    return `
+    <div class="period-edit ${cls}" data-period="${p.code}">
+      <div class="pe-head">
+        <b>${esc(p.name)}</b>
+        <span class="phase-tag">${tag}</span>
+        ${p.remark ? `<span style="color:var(--tx-3);font-size:var(--fs-2)">${esc(p.remark)}</span>` : ""}
+      </div>
+      <div class="pe-fields">
+        <label>开始<input class="inp" type="datetime-local" data-p-start value="${toLocalInput(p.start)}"></label>
+        <label>结束<input class="inp" type="datetime-local" data-p-end value="${toLocalInput(p.end)}"></label>
+        <button class="btn sm" data-p-save="${p.code}">${icon("check", 16)} 保存该阶段</button>
+      </div>
+    </div>`;
+  };
 
   view.innerHTML = `
     ${pageHead("规则配置", "实时生效，直接影响学生端选课行为")}
@@ -1176,8 +1201,20 @@ export async function renderAdminRules(view) {
         <button class="btn primary" id="ruleSave">${icon("check", 18)} 保存规则</button>
       </div>
     </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <h2 style="font-size:var(--fs-h2)">选课阶段时间</h2>
+        <span class="tag" style="color:var(--tx-3);font-size:var(--fs-2)">数据源：selection_period</span>
+      </div>
+      <div style="font-size:var(--fs-2);color:var(--tx-3);margin-bottom:12px">
+        这里是学生端倒计时的唯一依据。把某个阶段改到未来，学生端倒计时会立刻跟着变，无需重启服务。
+      </div>
+      ${periods.length ? periods.map(periodRow).join("") : emptyBox("尚未配置选课阶段", "请先在数据库中初始化 selection_period 表")}
+    </div>
+
     <div class="callout warn">
-      <b>提示　</b>修改后无需重启即可生效：例如把「学分上限」调低，学生端立即按新上限校验；把「选课通道」关闭，学生提交会被拒绝并提示教务已关闭。
+      <b>提示　</b>修改后无需重启即可生效：例如把「学分上限」调低，学生端立即按新上限校验；把「选课通道」关闭，学生提交会被拒绝并提示教务已关闭；调整「选课阶段时间」会直接改变学生端看到的倒计时。
     </div>`;
 
   view.querySelector("#ruleSave").onclick = async () => {
@@ -1185,7 +1222,7 @@ export async function renderAdminRules(view) {
     view.querySelectorAll("[data-rule]").forEach((inp) => {
       patch[inp.dataset.rule] = inp.type === "checkbox" ? inp.checked : Number(inp.value);
     });
-    const res = await api.setAdminRules(patch);
+    await api.setAdminRules(patch);
     toast("规则已保存", "已实时生效", "ok");
     renderAdminRules(view);
   };
@@ -1197,6 +1234,20 @@ export async function renderAdminRules(view) {
     renderAdminRules(view);
     refreshBadge();
   };
+  /* 逐个阶段保存：只提交该行的起止时间 */
+  view.querySelectorAll("[data-p-save]").forEach((btn) => (btn.onclick = async () => {
+    const row = btn.closest("[data-period]");
+    const startTime = row.querySelector("[data-p-start]").value;
+    const endTime = row.querySelector("[data-p-end]").value;
+    if (!startTime || !endTime) { toast("时间不完整", "请同时填写开始与结束时间", "warn"); return; }
+    const res = await api.setPeriod(btn.dataset.pSave, {
+      startTime: startTime.replace("T", " "),
+      endTime: endTime.replace("T", " "),
+    });
+    if (res.data.error) { toast("保存失败", res.data.error, "warn"); return; }
+    toast("阶段已更新", "学生端倒计时已按新时间刷新", "ok");
+    renderAdminRules(view);
+  }));
 }
 
 export async function renderAdminMonitor(view) {

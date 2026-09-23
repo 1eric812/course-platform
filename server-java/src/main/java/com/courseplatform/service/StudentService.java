@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.courseplatform.entity.Course;
 import com.courseplatform.entity.Message;
 import com.courseplatform.entity.SeatSubscription;
+import com.courseplatform.entity.SelectionPeriod;
 import com.courseplatform.entity.SelectionRule;
 import com.courseplatform.entity.SelectionTicket;
 import com.courseplatform.entity.SelectionTicketItem;
@@ -12,7 +13,11 @@ import com.courseplatform.entity.UserPreference;
 import com.courseplatform.entity.Wishlist;
 import com.courseplatform.exception.ApiException;
 import com.courseplatform.mapper.CourseMapper;
+import com.courseplatform.mapper.CourseScheduleMapper;
 import com.courseplatform.mapper.MessageMapper;
+import com.courseplatform.mapper.SemesterMapper;
+import com.courseplatform.mapper.StudentMapper;
+import com.courseplatform.mapper.SysUserMapper;
 import com.courseplatform.mapper.SeatSubscriptionMapper;
 import com.courseplatform.mapper.SelectionRuleMapper;
 import com.courseplatform.mapper.SelectionTicketItemMapper;
@@ -55,11 +60,13 @@ public class StudentService {
     private final SelectionTicketMapper ticketMapper;
     private final SelectionTicketItemMapper ticketItemMapper;
     private final ThreadPoolTaskExecutor executor;
+    private final PeriodService periodService;
 
     public StudentService(CourseService courseService, CourseMapper courseMapper, WishlistMapper wishlistMapper,
                           StudentCourseMapper studentCourseMapper, SeatSubscriptionMapper subscriptionMapper,
                           MessageMapper messageMapper, UserPreferenceMapper prefMapper, SelectionRuleMapper ruleMapper,
-                          SelectionTicketMapper ticketMapper, SelectionTicketItemMapper ticketItemMapper) {
+                          SelectionTicketMapper ticketMapper, SelectionTicketItemMapper ticketItemMapper,
+                          PeriodService periodService) {
         this.courseService = courseService;
         this.courseMapper = courseMapper;
         this.wishlistMapper = wishlistMapper;
@@ -70,6 +77,7 @@ public class StudentService {
         this.ruleMapper = ruleMapper;
         this.ticketMapper = ticketMapper;
         this.ticketItemMapper = ticketItemMapper;
+        this.periodService = periodService;
         this.executor = new ThreadPoolTaskExecutor();
         this.executor.setCorePoolSize(2);
         this.executor.setMaxPoolSize(4);
@@ -185,6 +193,16 @@ public class StudentService {
         SelectionRule rule = courseService.rule();
         if (rule.getSelectionOpen() == null || rule.getSelectionOpen() != 1)
             throw new ApiException(400, "选课未开放（教务已暂时关闭选课通道）", null);
+        /* 阶段窗口门禁：教务开关之外，还要求当前时刻落在某个 selection_period 阶段内。
+         * 与静态版 docs/js/backend/service.js#submitSelection 保持同一套判断口径。 */
+        if (periodService.current() == null) {
+            SelectionPeriod nxt = periodService.next();
+            String msg = nxt != null
+                    ? "当前不在选课阶段内，「" + nxt.getPhaseName() + "」将于 "
+                      + nxt.getStartTime().toLocalDate() + " " + nxt.getStartTime().toLocalTime() + " 开放"
+                    : "当前不在选课阶段内，请等待教务安排选课时间";
+            throw new ApiException(400, msg, null);
+        }
 
         long processing = ticketMapper.selectCount(new QueryWrapper<SelectionTicket>()
                 .eq("student_id", u.getStudentId())
