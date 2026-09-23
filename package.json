@@ -1,0 +1,20 @@
+{
+  "name": "course-selection-platform",
+  "version": "1.0.0",
+  "description": "高校选课平台：前后端分离原型（后端 Java / Spring Boot 3，前端原生 ESM）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build:server": "cd server-java && mvn clean package -DskipTests",
+    "start:server": "cd server-java && java -Dserver.port=8080 -jar target/course-platform-server-1.0.0.jar",
+    "db:reset": "node reset-db-java.mjs",
+    "e2e": "node e2e.mjs"
+  },
+  "engines": {
+    "node": ">=18",
+    "java": ">=17"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.4"
+  }
+}

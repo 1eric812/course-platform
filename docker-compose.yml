@@ -1,0 +1,60 @@
+# ============================================================
+# 高校选课平台 - 一键启动（MySQL 8 + 后端/前端）
+#
+# 用法：
+#   1. cp .env.docker.example .env  并修改密码
+#   2. docker compose up -d --build
+#   3. 浏览器打开 http://localhost:8080
+#
+# 首次启动会自动建库建表并灌入演示数据（见 docker/mysql-init/）
+# ============================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: course-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: course_platform
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 按文件名顺序执行，完成建库 → 建表 → 灌数据
+      - ./server-java/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./server-java/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: course-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # 容器内用服务名 mysql，不是 127.0.0.1
+      DB_URL: jdbc:mysql://mysql:3306/course_platform?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      SERVER_PORT: 8080
+      JWT_SECRET: ${JWT_SECRET:-course-platform-demo-secret-key-please-change-in-prod-2026}
+      TZ: Asia/Shanghai
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+
+volumes:
+  mysql-data:

@@ -1,0 +1,21 @@
+node_modules/
+server.log
+*.log
+.env
+.env.*
+!.env.docker.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ---- 构建产物 ----
+server-java/target/
+target/
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# ---- 运行期日志 ----
+startup-*.log
+startup-*.err

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-density="standard" data-font="standard">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>选课平台 · Course Selection</title>
+<link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="icon-btn nav-toggle" id="navToggle" aria-label="展开导航">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    <span class="icon-btn-text">菜单</span>
+  </button>
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-text">选课平台</span></div>
+  <div class="topbar-search">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="search-icon"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <input id="globalSearch" type="search" placeholder="搜索课程名称 / 课程号 / 教师" autocomplete="off">
+  </div>
+  <div class="topbar-right">
+    <button class="icon-btn m-search-toggle" id="mSearchToggle" aria-label="搜索课程" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <div class="role-badge" id="roleBadge" title="当前登录端"><span class="rb-dot" aria-hidden="true"></span><span id="roleBadgeText">未登录</span></div>
+    <button class="icon-btn" id="logoutBtn" aria-label="退出登录" style="display:none">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="icon-btn-text">退出</span>
+    </button>
+    <div class="countdown-chip" title="距选课开放"><span class="cd-dot" aria-hidden="true"></span><span id="topCountdownText">--:--</span></div>
+    <div class="user-chip" id="userChip" title="当前账号（点击进入个人中心）">
+      <span class="avatar" id="userAvatar">?</span>
+      <span class="user-name" id="userName">…</span>
+    </div>
+    <button class="icon-btn" id="themeToggle" aria-label="切换深色模式">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
+      <span class="icon-btn-text">深色</span>
+    </button>
+  </div>
+</header>
+
+<!-- 移动端搜索行（桌面隐藏；<768px 时由搜索按钮开合） -->
+<div class="m-search" id="mSearch" hidden>
+  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="search-icon"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  <input id="mSearchInput" type="search" placeholder="搜索课程名称 / 课程号 / 教师" autocomplete="off">
+</div>
+
+<div class="layout">
+  <nav class="sidenav" id="sidenav" aria-label="主导航">
+    <ul id="navList"></ul>
+    <div class="sidenav-foot">
+      <div class="credit-meter">
+        <div class="cm-head"><span>已选学分</span><span id="creditText">0 / 30</span></div>
+        <div class="cm-track"><i id="creditBar"></i></div>
+      </div>
+    </div>
+  </nav>
+  <main class="main" id="main"><div id="view"></div></main>
+</div>
+
+<nav class="tabbar" id="tabbar" aria-label="底部导航"></nav>
+
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+<div class="scrim" id="scrim" hidden></div>
+<div class="modal-root" id="modalRoot"></div>
+
+<!-- 多端登录页 -->
+<div class="login-screen" id="loginScreen" hidden>
+  <div class="login-card">
+    <div class="login-visual">
+      <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><span>高校选课平台</span></div>
+      <div class="login-sub">多端密码登录 · 统一选课入口</div>
+      <div class="visual-panel">
+        <div class="visual-stat">
+          <span class="stat-k">课程总量</span>
+          <strong>40+</strong>
+        </div>
+        <div class="visual-stat">
+          <span class="stat-k">实时名额</span>
+          <strong>动态更新</strong>
+        </div>
+      </div>
+      <div class="demo-list">
+        <div class="demo-item">
+          <span class="demo-role student">学生端</span>
+          <span>2023010101 / 123456</span>
+        </div>
+        <div class="demo-item">
+          <span class="demo-role teacher">教师端</span>
+          <span>T1005 / teacher123</span>
+        </div>
+        <div class="demo-item">
+          <span class="demo-role admin">教务端</span>
+          <span>admin / admin123</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="login-panel">
+      <div class="login-panel-head">
+        <span class="panel-kicker">欢迎回来</span>
+        <h2>登录平台</h2>
+      </div>
+      <div class="chips login-roles" id="loginRoles">
+        <button class="chip on" data-role="STUDENT">学生端</button>
+        <button class="chip" data-role="TEACHER">教师端</button>
+        <button class="chip" data-role="ADMIN">教务端</button>
+      </div>
+      <div class="login-field">
+        <label for="loginUser">账号</label>
+        <input id="loginUser" type="text" placeholder="学生：学号　教师：工号　教务：admin" autocomplete="username">
+      </div>
+      <div class="login-field">
+        <label for="loginPass">密码</label>
+        <input id="loginPass" type="password" placeholder="请输入密码" autocomplete="current-password">
+      </div>
+      <div class="login-hint" id="loginHint"></div>
+      <div class="login-err" id="loginErr"></div>
+      <button class="btn primary login-btn" id="loginBtn">登　录</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
