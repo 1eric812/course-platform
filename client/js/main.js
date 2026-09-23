@@ -2,7 +2,7 @@
 
 import { api, auth } from "./api.js";
 import { store, applyPrefs } from "./store.js";
-import { icon, toast, esc } from "./ui.js";
+import { icon, toast, esc, confirmDialog } from "./ui.js";
 import {
   renderDashboard, renderCourses, renderWishlist, renderFlash,
   renderTimetable, renderMessages, renderSettings, renderArch, renderTeacher,
@@ -197,8 +197,119 @@ async function loadMe() {
     const nm = document.getElementById("userName");
     if (av) av.textContent = (u.name || "?").slice(0, 1);
     if (nm) nm.textContent = u.name || "";
-    document.getElementById("userChip").title = `${u.name || ""} · ${u.grade || ""} ${u.major || ""}（点击进入个人中心）`;
+    document.getElementById("userChip").title = `${u.name || ""} · ${u.grade || ""} ${u.major || ""}（点击查看身份与切换）`;
+    renderUserMenu(data);
   } catch (e) { /* 忽略 */ }
+}
+
+/* ---------- 当前账号下拉（P-08-4：身份概览 / 多身份切换 / 快捷设置） ---------- */
+let menuOpen = false;
+
+function closeUserMenu() {
+  const menu = document.getElementById("userMenu");
+  const chip = document.getElementById("userChip");
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  menuOpen = false;
+  if (chip) chip.setAttribute("aria-expanded", "false");
+}
+
+function renderUserMenu(data) {
+  const menu = document.getElementById("userMenu");
+  if (!menu) return;
+  const u = (data && data.user) || {};
+  const ssn = (data && data.session) || store.get().session || {};
+  const accounts = Array.isArray(data && data.accounts) ? data.accounts : [];
+  const roleLabel = { STUDENT: "学生端", TEACHER: "教师端", ADMIN: "教务端" }[ssn.role] || "已登录";
+  const ident = ssn.role === "TEACHER" ? ssn.teacherNo : ssn.role === "ADMIN" ? ssn.username : ssn.studentNo;
+  const initials = String(u.name || ssn.realName || ssn.username || "?").slice(0, 1);
+  const dark = store.get().prefs.theme === "dark";
+
+  menu.innerHTML = `
+    <div class="um-head">
+      <span class="um-av">${esc(initials)}</span>
+      <div class="um-id">
+        <div class="um-name">${esc(u.name || ssn.realName || ssn.username || "—")}</div>
+        <div class="um-sub">${esc(roleLabel)}${ident ? " · " + esc(ident) : ""}</div>
+      </div>
+    </div>
+    <button class="um-item" type="button" data-act="settings">${icon("user", 18)} 个人中心与偏好设置</button>
+    <button class="um-item" type="button" data-act="theme">${icon(dark ? "sun" : "moon", 18)} ${dark ? "切换浅色模式" : "切换深色模式"}</button>
+    ${accounts.length > 1 ? `
+      <div class="um-sep"></div>
+      <div class="um-label">我的账号 · ${accounts.length} 个在读身份</div>
+      ${accounts.map((a, i) => `
+        <div class="um-acct ${a.current ? "cur" : ""}">
+          <span class="a-av">${esc(String(a.name || "?").slice(0, 1))}</span>
+          <div class="a-meta"><b>${esc(a.name || "—")}</b><span>${esc(a.studentNo || "")} · 已选 ${Number(a.enrolledCount || 0)} 门</span></div>
+          ${a.current ? `<span class="tag ok">当前</span>` : `<button class="btn sm" type="button" data-switch="${i}">切换</button>`}
+        </div>`).join("")}` : ""}
+    <div class="um-sep"></div>
+    <button class="um-item danger" type="button" data-act="logout">${icon("logout", 18)} 退出登录</button>`;
+
+  const q = (sel) => menu.querySelector(sel);
+  q('[data-act="settings"]').onclick = () => { closeUserMenu(); location.hash = "#/settings"; };
+  q('[data-act="theme"]').onclick = () => { closeUserMenu(); toggleTheme(); };
+  q('[data-act="logout"]').onclick = () => { closeUserMenu(); doLogout(); };
+  menu.querySelectorAll("[data-switch]").forEach((b) => (b.onclick = () => {
+    closeUserMenu();
+    switchIdentity(accounts[Number(b.dataset.switch)]);
+  }));
+}
+
+function toggleUserMenu() {
+  const menu = document.getElementById("userMenu");
+  const chip = document.getElementById("userChip");
+  if (!menu) return;
+  if (menu.hidden) {
+    menu.hidden = false;
+    menuOpen = true;
+    if (chip) chip.setAttribute("aria-expanded", "true");
+  } else closeUserMenu();
+}
+
+/* 多身份切换（P-08-4）：不做静默换号，退出会话后回到登录页由用户重新输密码
+ * 原因：学生/教师/教务分端鉴权，token 与会话一一对应，避免跨身份串用会话。 */
+async function switchIdentity(acct) {
+  if (!acct) return;
+  const label = `${acct.name || "该身份"}${acct.studentNo ? "（" + acct.studentNo + "）" : ""}`;
+  const ok = await confirmDialog("切换身份", `将退出当前登录，并用 ${esc(label)} 重新登录（需重新输入密码）。是否继续？`);
+  if (!ok) return;
+  try { await api.logout(); } catch (e) { /* token 可能已失效 */ }
+  auth.setToken(null);
+  store.setToken(null);
+  store.setSession(null);
+  try { sessionStorage.setItem("cp_prefill", acct.studentNo || ""); } catch (e) { /* 忽略 */ }
+  location.reload();
+}
+
+/* 身份切换后回到登录页：回填学号并聚焦密码框，减少一次输入 */
+function restorePendingLogin() {
+  let prefill = "";
+  try { prefill = sessionStorage.getItem("cp_prefill") || ""; sessionStorage.removeItem("cp_prefill"); } catch (e) { return; }
+  if (!prefill || store.get().token) return;
+  document.getElementById("loginUser").value = prefill;
+  const hint = document.getElementById("loginHint");
+  if (hint) hint.textContent = `已切换身份 · ${prefill}，请输入密码完成登录`;
+  const pass = document.getElementById("loginPass");
+  if (pass) pass.focus();
+}
+
+/* ---------- 主题切换（顶部按钮与账号下拉共用） ---------- */
+function syncThemeLabel() {
+  const dark = store.get().prefs.theme === "dark";
+  const t = document.getElementById("themeToggleText");
+  if (t) t.textContent = dark ? "浅色" : "深色";
+  const btn = document.getElementById("themeToggle");
+  if (btn) btn.setAttribute("aria-label", dark ? "切换到浅色模式" : "切换到深色模式");
+}
+
+async function toggleTheme() {
+  const next = store.get().prefs.theme === "dark" ? "light" : "dark";
+  store.setPrefs({ theme: next });
+  syncThemeLabel();
+  toast(next === "dark" ? "已切换深色模式" : "已切换浅色模式", "", "ok", 1200);
+  try { await api.setPrefs({ theme: next }); } catch (e) { /* 后端不可用时仅本地生效，避免打断操作 */ }
 }
 
 /* ---------- 引导 ---------- */
@@ -298,8 +409,21 @@ async function boot() {
   document.getElementById("loginPass").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
   document.getElementById("logoutBtn").onclick = doLogout;
 
+  /* 账号下拉：点击空白处 / Esc / 路由切换时收起 */
+  document.addEventListener("click", (e) => {
+    if (!menuOpen) return;
+    if (e.target.closest("#userMenu") || e.target.closest("#userChip")) return;
+    closeUserMenu();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeUserMenu(); });
+  window.addEventListener("cp:switch-identity", (e) => switchIdentity(e.detail));
+  store.on(() => syncThemeLabel(), "prefs");
+
   setLoginRole("STUDENT");
   renderRoleBadge();
+  applyPrefs();        // 先用本地缓存的外观偏好着色，避免等待接口时的样式跳动
+  syncThemeLabel();
+  restorePendingLogin(); // 身份切换后回到登录页时回填账号
   if (!store.get().token) { showLogin(); return; } // 未登录 → 停在登录页
   await bootApp();
 }
@@ -314,21 +438,17 @@ async function bootApp() {
     document.getElementById("scrim").onclick = closeSidenav;
   };
 
-  document.getElementById("userChip").onclick = () => (location.hash = "#/settings");
+  document.getElementById("userChip").onclick = toggleUserMenu;
 
-  document.getElementById("themeToggle").onclick = async () => {
-    const next = store.get().prefs.theme === "dark" ? "light" : "dark";
-    store.setPrefs({ theme: next });
-    await api.setPrefs({ theme: next });
-    toast(next === "dark" ? "已切换深色模式" : "已切换浅色模式", "", "ok", 1200);
-  };
+  document.getElementById("themeToggle").onclick = () => toggleTheme();
 
   bindSearch();
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", () => { closeUserMenu(); render(); });
 
   try {
     const [prefs, status] = await Promise.all([api.prefs(), api.status()]);
     store.setPrefs(prefs.data);
+    syncThemeLabel();
     store.get().openAt = status.data.openAt;
   } catch (e) {
     applyPrefs();

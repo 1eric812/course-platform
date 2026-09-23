@@ -23,6 +23,13 @@ const ICONS = {
   down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  warn: '<path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  logout: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/>',
+  filter: '<path d="M4 5h16M7 12h10M10 19h4"/>',
+  swap: '<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 0 8h-1"/><path d="M17 20l4-4-4-4"/>',
+  shield: '<path d="M12 3l7 3v6c0 4.4-3 8-7 9-4-1-7-4.6-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
 };
 
 export function icon(name, size = 20) {
@@ -39,17 +46,36 @@ export function el(html) {
   return t.content.firstElementChild;
 }
 
-/* ---------- Toast ---------- */
+/* ---------- Toast（I-08 统一反馈：图标 + 语义色 + 手动关闭 + 悬停不消失） ---------- */
+const TOAST_ICON = { info: "info", ok: "check", warn: "warn", danger: "warn" };
+
 export function toast(title, body = "", type = "info", ms = 2600) {
   const stack = document.getElementById("toastStack");
-  const node = el(`<div class="toast ${type}"><div class="t-title">${esc(title)}</div>${body ? `<div class="t-body">${esc(body)}</div>` : ""}</div>`);
+  const node = el(`
+    <div class="toast ${type}" role="status">
+      <span class="t-ico" aria-hidden="true">${icon(TOAST_ICON[type] || "info", 18)}</span>
+      <div class="t-text">
+        <div class="t-title">${esc(title)}</div>
+        ${body ? `<div class="t-body">${esc(body)}</div>` : ""}
+      </div>
+      <button class="t-x" type="button" aria-label="关闭提示">${icon("x", 14)}</button>
+    </div>`);
   stack.appendChild(node);
-  setTimeout(() => {
-    node.style.transition = "opacity .3s, transform .3s";
+
+  let timer = null;
+  const close = () => {
+    if (node.dataset.closing) return;
+    node.dataset.closing = "1";
+    clearTimeout(timer);
+    node.style.transition = "opacity .24s, transform .24s";
     node.style.opacity = "0";
-    node.style.transform = "translateX(10px)";
-    setTimeout(() => node.remove(), 320);
-  }, ms);
+    node.style.transform = "translateY(6px) scale(.98)";
+    setTimeout(() => node.remove(), 260);
+  };
+  node.querySelector(".t-x").onclick = close;
+  /* 悬停暂停自动消失，方便阅读长文本（无障碍：提示不应在阅读中被动移除） */
+  node.addEventListener("mouseenter", () => clearTimeout(timer));
+  timer = setTimeout(close, ms);
 }
 
 /* ---------- Modal ---------- */
@@ -58,11 +84,15 @@ export function openModal({ title, body, actions = [] }) {
   const scrim = document.getElementById("scrim");
   scrim.hidden = false;
   const node = el(`
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <h2>${esc(title)}</h2>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <h2 id="modalTitle">${esc(title)}</h2>
+        <button class="modal-x" type="button" aria-label="关闭弹窗">${icon("x", 18)}</button>
+      </div>
       <div class="modal-body">${body}</div>
       <div class="modal-foot"></div>
     </div>`);
+  node.querySelector(".modal-x").onclick = closeModal;
   const foot = node.querySelector(".modal-foot");
   actions.forEach((a) => {
     const btn = el(`<button class="btn ${a.kind || ""}">${esc(a.label)}</button>`);
@@ -80,6 +110,8 @@ export function openModal({ title, body, actions = [] }) {
   root.appendChild(node);
   root.classList.add("on");
   scrim.onclick = closeModal;
+  /* Esc 关闭（once：单次弹窗只挂一个监听，关闭后自动移除） */
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); }, { once: true });
   return node;
 }
 
@@ -136,12 +168,19 @@ export function pageHead(title, sub) {
   return `<div class="page-head"><h1>${esc(title)}</h1>${sub ? `<p>${esc(sub)}</p>` : ""}</div>`;
 }
 
+/* 骨架屏（I-07）：卡片形态与真实课程卡一致，避免加载完成时布局跳动 */
 export function skeletonList(n = 5) {
   let s = "";
-  for (let i = 0; i < n; i++) s += `<div class="card"><div class="skeleton" style="width:40%"></div><div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:60%"></div></div>`;
+  for (let i = 0; i < n; i++) s += `
+    <div class="card sk-card" aria-hidden="true">
+      <div class="skeleton" style="width:12%;height:14px"></div>
+      <div class="skeleton" style="width:52%;height:18px"></div>
+      <div class="skeleton" style="width:82%"></div>
+      <div class="skeleton" style="width:64%"></div>
+    </div>`;
   return s;
 }
 
-export function emptyBox(title, sub) {
-  return `<div class="empty"><div class="e-ico">${icon("courses", 24)}</div><div class="e-title">${esc(title)}</div>${sub ? `<div class="e-sub">${esc(sub)}</div>` : ""}</div>`;
+export function emptyBox(title, sub, ico = "courses") {
+  return `<div class="empty"><div class="e-ico">${icon(ico, 26)}</div><div class="e-title">${esc(title)}</div>${sub ? `<div class="e-sub">${esc(sub)}</div>` : ""}</div>`;
 }

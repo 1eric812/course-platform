@@ -2,11 +2,16 @@
 
 import { api } from "./api.js";
 import { store } from "./store.js";
+import { register as registerCountdown, unregisterAll as unregisterCountdowns, onPhase as onCountdownPhase, PHASE_LABEL, setTarget as setCountdownTarget } from "./countdown.js";
 import { icon, esc, el, toast, openModal, closeModal, confirmDialog, seatHtml, tagsHtml, scheduleText, pageHead, skeletonList, emptyBox } from "./ui.js";
 
 let timers = [];
 function tick(fn, ms) { const id = setInterval(fn, ms); timers.push(id); return id; }
-export function clearViewTimers() { timers.forEach(clearInterval); timers = []; }
+export function clearViewTimers() {
+  timers.forEach((t) => (typeof t === "function" ? t() : t && t.dispose ? t.dispose() : clearInterval(t)));
+  timers = [];
+  unregisterCountdowns();
+}
 
 const DAYS = ["一", "二", "三", "四", "五", "六", "日"];
 let filterCache = null;
@@ -49,7 +54,7 @@ export async function renderDashboard(view) {
   const [status, tt, wish, msgs] = await Promise.all([
     api.status(), api.timetable(), api.wishlist(), api.messages(),
   ]);
-  store.get().openAt = status.data.openAt;
+  setCountdownTarget(status.data.openAt);
   store.setWishlist(wish.data.items);
   store.setUnread(msgs.data.items.filter((m) => !m.read).length);
   const c = tt.data;
@@ -97,20 +102,15 @@ export async function renderDashboard(view) {
     </div>`;
 
   view.querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => location.hash = "#/" + b.dataset.nav));
-  updateCountdown("dashCountdown");
-  tick(() => updateCountdown("dashCountdown"), 1000);
+  bindCountdown("dashCountdown");
 }
 
-function updateCountdown(elId) {
+/* 倒计时节点绑定：交给统一倒计时中心驱动，本页切走时自动注销 */
+function bindCountdown(elId) {
   const node = document.getElementById(elId);
-  const openAt = store.get().openAt;
-  if (!node || !openAt) return;
-  const diff = openAt - Date.now();
-  if (diff <= 0) { node.textContent = "已开放"; node.style.color = "var(--ok)"; return; }
-  const s = Math.floor(diff / 1000);
-  const mm = String(Math.floor(s / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  node.textContent = `${mm}:${ss}`;
+  if (!node) return;
+  const dispose = registerCountdown(node, { phaseClass: true });
+  timers.push({ dispose });
 }
 
 /* ================= 课程中心 ================= */
@@ -453,14 +453,14 @@ export async function renderFlash(view) {
   view.innerHTML = pageHead("抢课专区", "倒计时 · 实时名额 · 目标监控 · 异常可重试") + skeletonList(2);
   try {
     const status = await api.status();
-    store.get().openAt = status.data.openAt;
+    setCountdownTarget(status.data.openAt);
   } catch (e) { /* 倒计时容忍失败 */ }
 
   view.innerHTML = `
     ${pageHead("抢课专区", "倒计时 · 实时名额 · 目标监控 · 异常可重试")}
     <div class="card" style="text-align:center;padding:22px">
-      <div style="font-size:var(--fs-2);color:var(--tx-2)">距选课开放</div>
-      <div id="flashCd" style="font-size:44px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--pri)">--:--</div>
+      <div id="flashCdTip" style="font-size:var(--fs-2);color:var(--tx-2)" data-phase="normal">距选课开放</div>
+      <div id="flashCd" style="font-size:44px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--pri)" data-phase="normal">--:--</div>
       <div style="font-size:var(--fs-2);color:var(--tx-3)">名额实时推送，延迟 ≤ 1s</div>
       <div style="margin-top:12px"><button class="btn" id="flashRefresh">${icon("refresh", 18)} 手动刷新名额</button></div>
     </div>
@@ -515,10 +515,18 @@ export async function renderFlash(view) {
 
   view.querySelector("#flashRefresh").onclick = async () => { await load(); toast("已刷新", "", "ok", 1200); };
 
-  const cd = () => updateCountdown("flashCd");
-  cd(); tick(cd, 500);
+  /* 倒计时交由统一中心驱动，并订阅阶段变化更新提示文案 */
+  bindCountdown("flashCd");
+  const cdTip = view.querySelector("#flashCdTip");
+  const offPhase = onCountdownPhase(({ phase }) => {
+    if (cdTip) {
+      cdTip.textContent = PHASE_LABEL[phase] || "";
+      cdTip.dataset.phase = phase;
+    }
+  });
+  timers.push({ dispose: offPhase });
 
-  api.onSeats((payload) => {
+  const offSeats = api.onSeats((payload) => {
     if (payload.type !== "seats") return;
     const map = new Map(payload.seats.map((s) => [s.id, s.remaining]));
     document.querySelectorAll("[data-seat]").forEach((n) => {
@@ -526,6 +534,7 @@ export async function renderFlash(view) {
       if (map.has(id)) n.textContent = map.get(id);
     });
   });
+  timers.push({ dispose: offSeats });
 }
 
 /* ================= 我的课表 ================= */

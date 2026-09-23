@@ -4,9 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>选课平台 · Course Selection</title>
+<meta name="description" content="高校选课平台：多端密码登录 · 多维筛选 · 志愿梯队提交 · 实时名额推送">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1D4ED8">
 <link rel="stylesheet" href="css/main.css">
+<script>
+/* 首屏渲染前应用本地缓存的外观偏好，避免深色模式白闪 */
+try {
+  var p = JSON.parse(localStorage.getItem("cp_prefs") || "{}");
+  var r = document.documentElement;
+  r.setAttribute("data-theme", p.theme === "dark" ? "dark" : "light");
+  r.setAttribute("data-density", ["compact", "loose"].indexOf(p.density) >= 0 ? p.density : "standard");
+  r.setAttribute("data-font", ["small", "large", "xlarge"].indexOf(p.fontScale) >= 0 ? p.fontScale : "standard");
+} catch (e) { /* 缓存异常时忽略，保持默认外观 */ }
+</script>
 </head>
 <body>
+<a class="skip-link" href="#view">跳到主要内容</a>
 
 <header class="topbar">
   <button class="icon-btn nav-toggle" id="navToggle" aria-label="展开导航">
@@ -19,11 +33,14 @@
     <input id="globalSearch" type="search" placeholder="搜索课程名称 / 课程号 / 教师" autocomplete="off">
   </div>
   <div class="topbar-right">
-    <div class="role-switch" id="roleSwitch" role="group" aria-label="切换角色">
-      <button class="role-btn active" data-role="student">学生</button>
-      <button class="role-btn" data-role="teacher">教师</button>
-      <button class="role-btn" data-role="admin">教务</button>
-    </div>
+    <button class="icon-btn m-search-toggle" id="mSearchToggle" aria-label="搜索课程" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <div class="role-badge" id="roleBadge" title="当前登录端"><span class="rb-dot" aria-hidden="true"></span><span id="roleBadgeText">未登录</span></div>
+    <button class="icon-btn" id="logoutBtn" aria-label="退出登录" style="display:none">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="icon-btn-text">退出</span>
+    </button>
     <div class="countdown-chip" title="距选课开放"><span class="cd-dot" aria-hidden="true"></span><span id="topCountdownText">--:--</span></div>
     <div class="user-chip" id="userChip" title="当前账号（点击进入个人中心）">
       <span class="avatar" id="userAvatar">?</span>
@@ -31,10 +48,16 @@
     </div>
     <button class="icon-btn" id="themeToggle" aria-label="切换深色模式">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
-      <span class="icon-btn-text">深色</span>
+      <span class="icon-btn-text" id="themeToggleText">深色</span>
     </button>
   </div>
 </header>
+
+<!-- 移动端搜索行（桌面隐藏；<768px 时由搜索按钮开合） -->
+<div class="m-search" id="mSearch" hidden>
+  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="search-icon"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  <input id="mSearchInput" type="search" placeholder="搜索课程名称 / 课程号 / 教师" autocomplete="off">
+</div>
 
 <div class="layout">
   <nav class="sidenav" id="sidenav" aria-label="主导航">
@@ -54,6 +77,63 @@
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 <div class="scrim" id="scrim" hidden></div>
 <div class="modal-root" id="modalRoot"></div>
+
+<!-- 多端登录页 -->
+<div class="login-screen" id="loginScreen" hidden>
+  <div class="login-card">
+    <div class="login-visual">
+      <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><span>高校选课平台</span></div>
+      <div class="login-sub">多端密码登录 · 统一选课入口</div>
+      <div class="visual-panel">
+        <div class="visual-stat">
+          <span class="stat-k">课程总量</span>
+          <strong>40+</strong>
+        </div>
+        <div class="visual-stat">
+          <span class="stat-k">实时名额</span>
+          <strong>动态更新</strong>
+        </div>
+      </div>
+      <div class="demo-list">
+        <button type="button" class="demo-item" data-role="student" data-user="2023010101" data-pass="123456" title="点击一键回填学生端演示账号">
+          <span class="demo-role student">学生端</span>
+          <span>2023010101 / 123456</span>
+        </button>
+        <button type="button" class="demo-item" data-role="teacher" data-user="T1005" data-pass="teacher123" title="点击一键回填教师端演示账号">
+          <span class="demo-role teacher">教师端</span>
+          <span>T1005 / teacher123</span>
+        </button>
+        <button type="button" class="demo-item" data-role="admin" data-user="admin" data-pass="admin123" title="点击一键回填教务端演示账号">
+          <span class="demo-role admin">教务端</span>
+          <span>admin / admin123</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="login-panel">
+      <div class="login-panel-head">
+        <span class="panel-kicker">欢迎回来</span>
+        <h2>登录平台</h2>
+      </div>
+      <div class="chips login-roles" id="loginRoles">
+        <button class="chip on" data-role="student">学生端</button>
+        <button class="chip" data-role="teacher">教师端</button>
+        <button class="chip" data-role="admin">教务端</button>
+      </div>
+      <div class="login-field">
+        <label for="loginUser">账号</label>
+        <input id="loginUser" type="text" placeholder="学生：学号　教师：工号　教务：admin" autocomplete="username">
+      </div>
+      <div class="login-field">
+        <label for="loginPass">密码</label>
+        <input id="loginPass" type="password" placeholder="请输入密码" autocomplete="current-password">
+      </div>
+      <div class="login-hint" id="loginHint"></div>
+      <div class="login-err" id="loginErr"></div>
+      <button class="btn primary login-btn" id="loginBtn">登　录</button>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="js/main.js"></script>
 </body>

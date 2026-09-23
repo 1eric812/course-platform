@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: e6d45bac59d21b2ad19738d6bf675356_a38c1bf7b6ef11f18db252540024e231
+    ReservedCode1: U9YrIsci8SAyptRTgMYAwHC2/4JeXJ6ypaHOWuGcIK8WSgtMWXC1lZ0TvtCToS2nAV6oSb4RVfELMWkt+3OhckOuCnXosUoMWzLrfsODt0ruDt/X4ttBUHHfkcCMhZVZu5WmdXauAEoJCaoVp7gAtRLb7Cc9kr5FO0kk6T0u9hXylCjEo6mp8qowFIA=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: e6d45bac59d21b2ad19738d6bf675356_a38c1bf7b6ef11f18db252540024e231
+    ReservedCode2: U9YrIsci8SAyptRTgMYAwHC2/4JeXJ6ypaHOWuGcIK8WSgtMWXC1lZ0TvtCToS2nAV6oSb4RVfELMWkt+3OhckOuCnXosUoMWzLrfsODt0ruDt/X4ttBUHHfkcCMhZVZu5WmdXauAEoJCaoVp7gAtRLb7Cc9kr5FO0kk6T0u9hXylCjEo6mp8qowFIA=
+---
+
 # 高校选课平台（Course Selection Platform）
 
 基于《高校选课系统设计方案》实现的前后端分离原型。**多端登录（学生端 / 教师端 / 教务端），
@@ -135,3 +146,4 @@ node e2e.mjs   # 31 项断言：健康检查 / 三端登录 / 端账号绑定 / 
 | `mapper` | MyBatis-Plus 数据访问 |
 | `config.AuthInterceptor` | 令牌解析（请求头 / `?token=`）、黑名单校验、按路径角色隔离、运行监控埋点 |
 | `exception.GlobalExceptionHandler` | 统一错误结构 `{error, code}`（与前端 `api.js` 契约一致） |
+*（内容由AI生成，仅供参考）*

@@ -138,7 +138,7 @@ function updateCountdown(elId) {
   const ss = String(s % 60).padStart(2, "0");
   node.textContent = `${mm}:${ss}`;
   /* P-01-1：倒计时进入最后 1 小时提高视觉权重 */
-  node.style.color = diff <= 3600000 ? "var(--danger)" : "";
+  node.style.color = diff <= 3600000 ? "var(--danger-t)" : "";
   node.style.fontWeight = diff <= 3600000 ? "700" : "";
 }
 
@@ -182,7 +182,15 @@ export async function renderCourses(view) {
 
   view.innerHTML = `
     ${pageHead("课程中心", "多维筛选 · 四类冲突预检测 · 一键加入心愿单")}
-    <div class="filters">
+    <div class="filters" id="filterPanel">
+      <div class="f-head">
+        <span class="f-head-title">${icon("filter", 18)} 筛选条件<span class="f-count" id="fCount" hidden></span></span>
+        <div class="f-head-actions">
+          <button class="btn sm f-toggle" id="filterToggle" type="button" aria-expanded="true" aria-controls="filterRows">收起筛选</button>
+          <button class="btn sm" id="clearFilters" type="button">清空筛选</button>
+        </div>
+      </div>
+      <div class="f-rows" id="filterRows">
       <div class="f-row">
         <div class="f-group"><span class="f-label">课程类别</span><div class="chips" data-f="category">${filterCache.category.map((x) => `<button class="chip" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>
         <div class="f-group"><span class="f-label">校区</span><div class="chips" data-f="campus">${filterCache.campus.map((x) => `<button class="chip" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>
@@ -206,15 +214,17 @@ export async function renderCourses(view) {
           <option value="rating">按评分</option>
           <option value="credits">按学分</option>
         </select>
-        <button class="btn sm" id="clearFilters">清空筛选</button>
       </div>
-      <div class="ftag-row" id="ftagRow" style="margin-top:12px"></div>
+      </div><!-- /f-rows 移动端折叠区 -->
+      <div class="ftag-row" id="ftagRow"></div>
       <div class="f-summary" id="fSummary"></div>
     </div>
     <div class="course-list" id="courseList">${skeletonList(6)}</div>`;
 
   syncFilterUI();
   renderFtags();
+  bindFilterPanel();
+  updateFilterChrome();
 
   const reload = async () => {
     const listEl = document.getElementById("courseList");
@@ -260,8 +270,8 @@ export async function renderCourses(view) {
 
   await reload();
 
-  // 实时名额更新（SSE）
-  api.onSeats((payload) => {
+  // 实时名额更新（SSE，断线自动降级轮询）
+  watchSeats((payload) => {
     if (payload.type !== "seats") return;
     const map = new Map(payload.seats.map((s) => [s.id, s.remaining]));
     document.querySelectorAll("[data-seat]").forEach((n) => {
@@ -290,6 +300,47 @@ function renderFtags() {
   }));
   const all = row.querySelector("[data-ftag-all]");
   if (all) all.onclick = () => document.getElementById("clearFilters").click();
+  updateFilterChrome();
+}
+
+/* 移动端筛选区折叠（P-01-6）：小屏默认收起，仅留"筛选条件"摘要条，避免筛选区把课程列表挤出首屏 */
+function bindFilterPanel() {
+  const panel = document.getElementById("filterPanel");
+  const toggle = document.getElementById("filterToggle");
+  const rows = document.getElementById("filterRows");
+  if (!panel || !toggle || !rows) return;
+  const mq = window.matchMedia("(max-width: 900px)");
+  let open = !mq.matches;
+
+  const apply = () => {
+    const mobile = mq.matches;
+    if (!mobile) open = true;
+    toggle.hidden = !mobile;
+    rows.hidden = !open;
+    panel.classList.toggle("collapsed", !open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.textContent = open ? "收起筛选" : "展开筛选";
+    updateFilterChrome();
+  };
+
+  apply();
+  toggle.onclick = () => { open = !open; apply(); };
+  const onMq = () => { open = !mq.matches; apply(); };
+  if (mq.addEventListener) mq.addEventListener("change", onMq); else mq.addListener(onMq);
+}
+
+/* 已选条件计数：折叠状态下也能看到"筛选条件 · 已选 N"，提示存在生效中的筛选（避免"看不到结果却不知为何"） */
+function updateFilterChrome() {
+  const n = activeFilterTags().length;
+  const badge = document.getElementById("fCount");
+  if (badge) {
+    badge.textContent = n ? `已选 ${n}` : "";
+    badge.hidden = n === 0;
+  }
+  const toggle = document.getElementById("filterToggle");
+  if (toggle && !toggle.hidden && toggle.getAttribute("aria-expanded") === "false") {
+    toggle.textContent = n ? `展开筛选（${n}）` : "展开筛选";
+  }
 }
 
 function syncFilterUI() {
@@ -330,7 +381,7 @@ function renderCourseList() {
           <span><b>评分</b> ${c.rating}</span>
           ${c.prereq ? `<span><b>先修</b> ${esc(c.prereq)}</span>` : ""}
         </div>
-        ${(c.conflictDetail || []).map((x) => `<div class="cc-why" style="color:${x.level === "hard" ? "var(--danger)" : "var(--warn)"}">${icon("info", 14)} ${esc(x.message)}</div>`).join("")}
+        ${(c.conflictDetail || []).map((x) => `<div class="cc-why" style="color:${x.level === "hard" ? "var(--danger-t)" : "var(--warn-t)"}">${icon("info", 14)} ${esc(x.message)}</div>`).join("")}
       </div>
       <div class="cc-side">
         ${seatHtml(c)}
@@ -748,6 +799,7 @@ export async function renderSettings(view) {
       ? `工号 ${ssn.teacherNo || "—"} · ${ssn.title || "—"} · ${ssn.dept || "—"}`
       : `管理账号 ${ssn.username || "—"}`;
   const s = store.get();
+  const accounts = Array.isArray(me && me.accounts) ? me.accounts : [];
 
   view.innerHTML = `
     ${pageHead("个人中心", "偏好设置与个性化")}
@@ -782,7 +834,7 @@ export async function renderSettings(view) {
       </div>
     </div>
     <div class="card">
-      <h2 style="font-size:var(--fs-h2);margin-bottom:12px">当前登录身份</h2>
+      <h2 style="font-size:var(--fs-h2);margin-bottom:12px">登录身份${accounts.length > 1 ? `（${accounts.length} 个在读身份）` : ""}</h2>
       <div class="acct-item cur">
         <div class="avatar">${esc((ssn.realName || ssn.username || "?").slice(0, 1))}</div>
         <div class="meta">
@@ -790,7 +842,20 @@ export async function renderSettings(view) {
           <div class="s">${esc(identityLine)}</div>
         </div>
       </div>
-      <p style="margin:8px 0 0;color:var(--tx-3);font-size:var(--fs-2)">账号密码存于本地 MySQL（sys_user 表），三个端各自使用独立账号密码登录；接口按端鉴权，学生 / 教师 / 教务互不可见对方功能。</p>
+      ${accounts.length > 1 ? `
+        <div class="acct-list">
+          ${accounts.map((a, i) => `
+            <div class="acct-item ${a.current ? "cur" : ""}">
+              <div class="avatar">${esc(String(a.name || "?").slice(0, 1))}</div>
+              <div class="meta">
+                <div class="n">${esc(a.name || "—")}${a.current ? ` <span class="tag ok">当前登录</span>` : ""}</div>
+                <div class="s">学号 ${esc(a.studentNo || "—")} · 已选 ${Number(a.enrolledCount || 0)} 门</div>
+              </div>
+              ${a.current ? "" : `<button class="btn sm" type="button" data-switch="${i}">切换登录</button>`}
+            </div>`).join("")}
+        </div>
+        <p class="hint-text">同一自然人可能持有多个身份（如主修 + 辅修）。切换身份会先退出当前会话，再用目标账号重新登录，避免跨身份串用登录态。</p>` : ""}
+      <p class="hint-text">账号密码存于本地 MySQL（sys_user 表），三个端各自使用独立账号密码登录；接口按端鉴权，学生 / 教师 / 教务互不可见对方功能。</p>
       <button class="btn" id="logoutHere" style="margin-top:12px">退出登录</button>
     </div>
     <div class="card">
@@ -814,6 +879,12 @@ export async function renderSettings(view) {
   bindChips("#fontChips", "fontScale");
   bindChips("#densityChips", "density");
   bindChips("#viewChips", "timetableView");
+
+  view.querySelectorAll("[data-switch]").forEach((b) => (b.onclick = () => {
+    const a = accounts[Number(b.dataset.switch)];
+    /* 切换身份统一走 main.js 的会话流程（确认 → 退出 → 回登录页预填账号），避免各视图各写一套 */
+    window.dispatchEvent(new CustomEvent("cp:switch-identity", { detail: a }));
+  }));
 
   const lo = view.querySelector("#logoutHere");
   if (lo) lo.onclick = async () => {

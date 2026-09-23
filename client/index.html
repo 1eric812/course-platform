@@ -4,9 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>选课平台 · Course Selection</title>
+<meta name="description" content="高校选课平台：多端密码登录 · 多维筛选 · 志愿梯队提交 · 实时名额推送">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1D4ED8">
 <link rel="stylesheet" href="css/main.css">
+<script>
+/* 首屏渲染前应用本地缓存的外观偏好，避免深色模式白闪（P-08-1 / V-03） */
+try {
+  var p = JSON.parse(localStorage.getItem("cp_prefs") || "{}");
+  var r = document.documentElement;
+  r.setAttribute("data-theme", p.theme === "dark" ? "dark" : "light");
+  r.setAttribute("data-density", ["compact", "loose"].indexOf(p.density) >= 0 ? p.density : "standard");
+  r.setAttribute("data-font", ["small", "large", "xlarge"].indexOf(p.fontScale) >= 0 ? p.fontScale : "standard");
+} catch (e) { /* 缓存异常时忽略，保持默认外观 */ }
+</script>
 </head>
 <body>
+<a class="skip-link" href="#view">跳到主要内容</a>
 
 <header class="topbar">
   <button class="icon-btn nav-toggle" id="navToggle" aria-label="展开导航">
@@ -28,13 +42,16 @@
       <span class="icon-btn-text">退出</span>
     </button>
     <div class="countdown-chip" title="距选课开放"><span class="cd-dot" aria-hidden="true"></span><span id="topCountdownText">--:--</span></div>
-    <div class="user-chip" id="userChip" title="当前账号（点击进入个人中心）">
+    <div class="user-chip" id="userChip" title="当前账号（点击查看身份与切换）" aria-haspopup="menu" aria-expanded="false">
       <span class="avatar" id="userAvatar">?</span>
       <span class="user-name" id="userName">…</span>
+      <svg class="uc-caret" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
+    <!-- 当前账号下拉：身份概览 / 多身份切换 / 偏好快捷入口（P-08-4） -->
+    <div class="user-menu" id="userMenu" role="menu" hidden></div>
     <button class="icon-btn" id="themeToggle" aria-label="切换深色模式">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
-      <span class="icon-btn-text">深色</span>
+      <span class="icon-btn-text" id="themeToggleText">深色</span>
     </button>
   </div>
 </header>
