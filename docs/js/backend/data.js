@@ -231,15 +231,50 @@ export function genRoster(course) {
  * 教务管理端 · 规则 / 异常 / 运行指标
  * ============================================================ */
 
+/** 规则默认值（resetDemo 也回到这里） */
+const RULE_DEFAULTS = {
+  selectionOpen: true,    // 选课是否开放
+  creditLimit: 30,        // 学分上限
+  maxWishlist: 8,         // 心愿单上限
+  allowCrossCampus: true, // 是否允许跨校区选课
+  blockOnConflict: true,  // 时间冲突是否硬性阻断
+};
+
+/* 静态版没有服务端进程，adminState 只是 JS 模块内存：教务改完规则，
+ * 学生端一切换账号 / 刷新页面就会重新 import 本模块、规则被打回默认值，
+ * 用户看到的就是「设了 120，一刷新又变回 30」。
+ * 所以规则同样落 localStorage（与 cp_session / cp_periods 一致的存法）。 */
+const RULE_KEY = "cp_rules";
+
+function loadRules() {
+  try {
+    const raw = localStorage.getItem(RULE_KEY);
+    if (!raw) return { ...RULE_DEFAULTS };
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved !== "object") return { ...RULE_DEFAULTS };
+    /* 以默认为骨架逐字段回填，避免历史数据缺字段或类型漂移 */
+    const out = { ...RULE_DEFAULTS };
+    for (const k of Object.keys(RULE_DEFAULTS)) {
+      if (!(k in saved)) continue;
+      out[k] = typeof RULE_DEFAULTS[k] === "boolean" ? !!saved[k] : Number(saved[k]);
+      if (typeof out[k] === "number" && Number.isNaN(out[k])) out[k] = RULE_DEFAULTS[k];
+    }
+    return out;
+  } catch (e) {
+    return { ...RULE_DEFAULTS };
+  }
+}
+
+/** 规则写盘；存储不可用时静默降级为纯内存 */
+export function persistRules() {
+  try {
+    localStorage.setItem(RULE_KEY, JSON.stringify(adminState.rules));
+  } catch (e) { /* 隐私模式或配额不足 */ }
+}
+
 export const adminState = {
   // 可配置规则（会真实影响学生端行为）
-  rules: {
-    selectionOpen: true,    // 选课是否开放
-    creditLimit: 30,        // 学分上限
-    maxWishlist: 8,         // 心愿单上限
-    allowCrossCampus: true, // 是否允许跨校区选课
-    blockOnConflict: true,  // 时间冲突是否硬性阻断
-  },
+  rules: loadRules(),
   // 异常工单（pending=待处理 / resolved=已处理）
   anomalies: [
     { id: 1, type: "conflict", student: "202314254 韩雨桐", courseId: 5, courseName: "机器学习导论", reason: "与「线性代数」时间冲突（周二 第 3-4 节）", time: "2026-09-21 09:12", status: "pending" },
@@ -456,5 +491,8 @@ export function resetDemo() {
   adminState.metrics.totalRequests = 0;
   adminState.metrics.errors = 0;
   adminState.metrics.byPath = {};
+  /* 规则也要回到默认值：否则「重置演示数据」后旧规则仍从 localStorage 被读回来 */
+  adminState.rules = { ...RULE_DEFAULTS };
+  persistRules();
   return { ok: true };
 }

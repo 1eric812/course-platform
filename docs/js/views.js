@@ -44,18 +44,23 @@ async function refreshCourses() {
 function updateCredit(used, limit) {
   const t = document.getElementById("creditText");
   const b = document.getElementById("creditBar");
-  if (t) t.textContent = `${used} / ${limit}`;
-  if (b) b.style.width = Math.min(100, Math.round((used / limit) * 100)) + "%";
+  /* 上限由后端 selection_rule.credit_limit 决定；缺失时才退回本地默认，避免出现 NaN / undefined */
+  if (limit != null && !Number.isNaN(Number(limit))) store.set({ creditLimit: Number(limit) });
+  const cap = store.get().creditLimit || 30;
+  if (t) t.textContent = `${used} / ${cap}`;
+  if (b) b.style.width = Math.min(100, Math.round((used / cap) * 100)) + "%";
 }
 
 /* ================= 首页工作台 ================= */
 export async function renderDashboard(view) {
   view.innerHTML = pageHead("首页工作台", "待办、倒计时与快捷入口") + skeletonList(2);
-  const [status, tt, wish, msgs] = await Promise.all([
-    api.status(), api.timetable(), api.wishlist(), api.messages(),
+  const [status, tt, wish, msgs, courses] = await Promise.all([
+    api.status(), api.timetable(), api.wishlist(), api.messages(), api.courses(qsParams()),
   ]);
   /* 倒计时锚点来自后端 selection_period 阶段表，而不是写死的「页面加载 + 90 秒」 */
   const ctx = setCountdownContext(status.data);
+  /* 学分上限由后端 selection_rule.credit_limit 决定，首页必须实时取，不能沿用登录前的初始值 */
+  updateCredit(courses.data.credits, courses.data.creditLimit);
   store.setWishlist(wish.data.items);
   store.setUnread(msgs.data.items.filter((m) => !m.read).length);
   const c = tt.data;
@@ -68,7 +73,7 @@ export async function renderDashboard(view) {
       <div class="stat"><div class="v" id="dashCountdown" data-phase="normal">--</div>
         <div class="l" id="dashCountdownCap">${esc(cdCap)}</div></div>
       <div class="stat"><div class="v">${c.courses.length}</div><div class="l">已选课程</div></div>
-      <div class="stat"><div class="v">${c.totalCredits}</div><div class="l">已选学分（上限 ${s.courses.creditLimit || 30}）</div></div>
+      <div class="stat"><div class="v">${c.totalCredits}</div><div class="l">已选学分（上限 ${s.creditLimit || 30}）</div></div>
       <div class="stat"><div class="v">${wish.data.items.length}</div><div class="l">心愿单待提交</div></div>
     </div>
 
@@ -1130,7 +1135,7 @@ export async function renderAdminRules(view) {
     ${pageHead("规则配置", "实时生效，直接影响学生端选课行为")}
     <div class="card">
       ${sw("selectionOpen", "选课通道", "关闭后学生无法提交选课（心愿单仍可维护）")}
-      ${num("creditLimit", "学分上限", "学生本学期已选学分不得超过该值", 6, 40)}
+      ${num("creditLimit", "学分上限", "学生本学期已选学分不得超过该值", 1, 300)}
       ${num("maxWishlist", "心愿单上限", "心愿单最多容纳课程数", 1, 20)}
       ${sw("allowCrossCampus", "允许跨校区选课", "关闭后跨校区连堂将被视为硬性冲突")}
       ${sw("blockOnConflict", "时间冲突硬性阻断", "关闭后时间冲突仅作警告，不阻断选课")}

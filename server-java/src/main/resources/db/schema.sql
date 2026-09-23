@@ -71,7 +71,7 @@ CREATE TABLE student (
     graduation_date DATE                 DEFAULT NULL   COMMENT '毕业时间',
     phone        VARCHAR(20)              DEFAULT NULL   COMMENT '手机号',
     study_status VARCHAR(16)     NOT NULL DEFAULT '在读' COMMENT '状态：在读 / 休学 / 毕业',
-    credit_limit DECIMAL(4, 1)   NOT NULL DEFAULT 30.0   COMMENT '本学期学分上限',
+    credit_limit DECIMAL(5, 1)   NOT NULL DEFAULT 30.0   COMMENT '本学期学分上限',
     -- 学业核心字段（按学期自动结算）
     current_selected_credits DECIMAL(5,1) NOT NULL DEFAULT 0.0 COMMENT '当前学期已选学分（在读）',
     current_earned_credits   DECIMAL(5,1) NOT NULL DEFAULT 0.0 COMMENT '当前学期已修学分（已获得）',
@@ -445,7 +445,7 @@ CREATE TABLE user_preference (
 CREATE TABLE selection_rule (
     id                  TINYINT       NOT NULL DEFAULT 1 COMMENT '固定为 1（单行配置）',
     selection_open      TINYINT       NOT NULL DEFAULT 1 COMMENT '选课开关：1=开放，0=关闭',
-    credit_limit        DECIMAL(4, 1) NOT NULL DEFAULT 30.0 COMMENT '单学期学分上限',
+    credit_limit        DECIMAL(5, 1) NOT NULL DEFAULT 30.0 COMMENT '单学期学分上限',
     max_courses         INT           NOT NULL DEFAULT 10 COMMENT '单学期最大课程数',
     max_wishlist        INT           NOT NULL DEFAULT 8 COMMENT '心愿单最大志愿数',
     drop_deadline       DATETIME               DEFAULT NULL COMMENT '退课截止时间',

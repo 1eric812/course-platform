@@ -49,17 +49,22 @@ async function refreshCourses() {
 function updateCredit(used, limit) {
   const t = document.getElementById("creditText");
   const b = document.getElementById("creditBar");
-  if (t) t.textContent = `${used} / ${limit}`;
-  if (b) b.style.width = Math.min(100, Math.round((used / limit) * 100)) + "%";
+  /* 上限由后端 selection_rule.credit_limit 决定；缺失时才退回本地默认，避免出现 NaN / undefined */
+  if (limit != null && !Number.isNaN(Number(limit))) store.set({ creditLimit: Number(limit) });
+  const cap = store.get().creditLimit || 30;
+  if (t) t.textContent = `${used} / ${cap}`;
+  if (b) b.style.width = Math.min(100, Math.round((used / cap) * 100)) + "%";
 }
 
 /* ================= 首页工作台 ================= */
 export async function renderDashboard(view) {
   view.innerHTML = pageHead("首页工作台", "待办、时间状态与快捷入口") + skeletonList(2);
-  const [status, tt, wish, msgs] = await Promise.all([
-    api.status(), api.timetable(), api.wishlist(), api.messages(),
+  const [status, tt, wish, msgs, courses] = await Promise.all([
+    api.status(), api.timetable(), api.wishlist(), api.messages(), api.courses(qsParams()),
   ]);
   store.get().openAt = status.data.openAt;
+  /* 学分上限来自后端 selection_rule，首页必须实时取 */
+  updateCredit(courses.data.credits, courses.data.creditLimit);
   /* P-01-1 选课节点：current=当前进行中，否则取最近一个未结束的阶段 */
   const phases = status.data.phases || [];
   const cur = phases.find((x) => x.current) || phases.find((x) => x.status !== "FINISHED") || null;
@@ -74,7 +79,7 @@ export async function renderDashboard(view) {
     <div class="grid g4" style="margin-bottom:14px">
       <div class="stat"><div class="v">${phaseLabel}</div><div class="l">选课时间状态</div></div>
       <div class="stat"><div class="v">${c.courses.length}</div><div class="l">已选课程</div></div>
-      <div class="stat"><div class="v">${c.totalCredits}</div><div class="l">已选学分（上限 ${s.courses.creditLimit || 30}）</div></div>
+      <div class="stat"><div class="v">${c.totalCredits}</div><div class="l">已选学分（上限 ${s.creditLimit || 30}）</div></div>
       <div class="stat"><div class="v">${wish.data.items.length}</div><div class="l">心愿单待提交</div></div>
     </div>
 
@@ -1192,7 +1197,7 @@ export async function renderAdminRules(view) {
     ${pageHead("规则配置", "实时生效，直接影响学生端选课行为")}
     <div class="card">
       ${sw("selectionOpen", "选课通道", "关闭后学生无法提交选课（心愿单仍可维护）")}
-      ${num("creditLimit", "学分上限", "学生本学期已选学分不得超过该值", 6, 40)}
+      ${num("creditLimit", "学分上限", "学生本学期已选学分不得超过该值", 1, 300)}
       ${num("maxWishlist", "心愿单上限", "心愿单最多容纳课程数", 1, 20)}
       ${sw("allowCrossCampus", "允许跨校区选课", "关闭后跨校区连堂将被视为硬性冲突")}
       ${sw("blockOnConflict", "时间冲突硬性阻断", "关闭后时间冲突仅作警告，不阻断选课")}
@@ -1376,3 +1381,268 @@ export async function refreshBadge() {
     n.style.display = v > 0 ? "inline-flex" : "none";
   });
 }
+
+/* ================= 学生端 · 学业闭环 ================= */
+
+function fmtNum(v) { return v == null || v === "" ? "—" : Number(v); }
+function fmtPct(v) { return v == null || v === "" ? "0%" : Number(v) + "%"; }
+
+function semName(id, fallback) {
+  if (id == null) return "当前学期";
+  return fallback && !/^\d+$/.test(fallback) ? fallback : "学期 " + id;
+}
+
+function scoreTable(list) {
+  const gradeTag = (g) => {
+    if (!g) return '<span class="tag">—</span>';
+    const cls = g === "优" ? "pri" : g === "不及格" ? "danger" : "ok";
+    return `<span class="tag ${cls}">${esc(g)}</span>`;
+  };
+  return `<div style="overflow-x:auto"><table class="api-table">
+    <thead><tr><th>课程</th><th>学分</th><th>平时</th><th>考勤</th><th>作业</th><th>期中</th><th>期末</th><th>总评</th><th>等级</th><th>绩点</th><th>补考</th><th>重修</th><th>状态</th></tr></thead>
+    <tbody>${list.map((s) => `
+      <tr>
+        <td><b>${esc(s.name || "")}</b><div class="sub" style="color:var(--tx-2);font-size:12px">${esc(s.code || "")} · ${esc(s.category || "")} · ${esc(s.teacherName || "")}</div></td>
+        <td>${fmtNum(s.credits)}</td>
+        <td>${fmtNum(s.regularScore)}</td>
+        <td>${fmtNum(s.attendanceScore)}</td>
+        <td>${fmtNum(s.homeworkScore)}</td>
+        <td>${fmtNum(s.midtermScore)}</td>
+        <td>${fmtNum(s.finalScore)}</td>
+        <td><b>${fmtNum(s.totalScore)}</b></td>
+        <td>${gradeTag(s.gradeLevel)}</td>
+        <td>${fmtNum(s.courseGpa)}</td>
+        <td>${s.retakeFlag ? fmtNum(s.retakeScore) : "—"}</td>
+        <td>${s.retakeCourseFlag ? (s.retakeTimes ? "重修×" + esc(s.retakeTimes) : "重修") : "—"}</td>
+        <td><span class="tag">${esc(s.status || "—")}</span></td>
+      </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+/* ---- 成绩查询（按学期） ---- */
+export async function renderScores(view) {
+  view.innerHTML = pageHead("成绩查询", "分项成绩 · 总评 · 等级 · 绩点 · 补考重修") + skeletonList(2);
+  const [res, recRes, hisRes] = await Promise.all([api.studentScores(), api.studentRecords(), api.studentScoreHistory()]);
+  const data = res.data || {};
+  const opts = new Map();
+  (recRes.data.items || []).forEach((r) => { if (r.semesterId != null) opts.set(String(r.semesterId), "学期 " + r.semesterId); });
+  (hisRes.data.semesters || []).forEach((g) => { if (g.semesterId != null) opts.set(String(g.semesterId), semName(g.semesterId, g.semesterName)); });
+  const optArr = [...opts.entries()];
+  const currentId = data.semesterId != null ? String(data.semesterId) : (optArr.length ? optArr[optArr.length - 1][0] : "");
+
+  view.innerHTML = `
+    ${pageHead("成绩查询", "分项成绩 · 总评 · 等级 · 绩点 · 补考重修")}
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      ${optArr.length ? `<div class="chips" id="scSemChips">${optArr.map(([id, name]) => `<button class="chip ${id === currentId ? "on" : ""}" data-sem="${id}">${esc(name)}</button>`).join("")}</div>` : '<span class="tag">暂无学期数据</span>'}
+      <span class="tag pri" id="scCount">0 门</span>
+    </div>
+    <div id="scBody"></div>`;
+
+  const body = view.querySelector("#scBody");
+  const paint = async (semId) => {
+    body.innerHTML = skeletonList(1);
+    const r = await api.studentScores(semId || undefined);
+    const list = r.data.items || [];
+    view.querySelector("#scCount").textContent = list.length + " 门";
+    body.innerHTML = list.length ? scoreTable(list) : emptyBox("该学期暂无成绩");
+  };
+  const chips = view.querySelector("#scSemChips");
+  if (chips) chips.addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    view.querySelectorAll("#scSemChips .chip").forEach((x) => x.classList.toggle("on", x === b));
+    paint(b.dataset.sem);
+  });
+  await paint(currentId || undefined);
+}
+
+/* ---- 历年成绩（按学期归档分组） ---- */
+export async function renderScoreHistory(view) {
+  view.innerHTML = pageHead("历年成绩", "已结课学期成绩归档 · 学分与平均绩点") + skeletonList(2);
+  const { data } = await api.studentScoreHistory();
+  const groups = data.semesters || [];
+  view.innerHTML = `
+    ${pageHead("历年成绩", "已结课学期成绩归档 · 学分与平均绩点")}
+    ${groups.length ? groups.map((g) => `
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+          <b>${esc(semName(g.semesterId, g.semesterName))}</b>
+          <span style="color:var(--tx-2);font-size:13px">${fmtNum(g.courseCount)} 门 · 总学分 ${fmtNum(g.totalCredits)} · 平均绩点 ${fmtNum(g.avgGpa)}</span>
+        </div>
+        ${(g.items || []).length ? scoreTable(g.items) : '<span class="tag">无记录</span>'}
+      </div>`).join("") : emptyBox("暂无历史成绩")}`;
+}
+
+/* ---- 学分体系 ---- */
+export async function renderCredits(view) {
+  view.innerHTML = pageHead("学分体系", "已修学分 · 绩点 · 毕业进度") + skeletonList(2);
+  const { data } = await api.studentCredits();
+  const pct = (v) => Math.max(0, Math.min(100, Number(v || 0)));
+  const bar = (val, label) => `
+    <div style="margin-top:6px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--tx-2);margin-bottom:4px"><span>${esc(label)}</span><span>${fmtPct(val)}</span></div>
+      <div style="height:8px;background:var(--n100);border-radius:99px;overflow:hidden"><div style="height:100%;width:${pct(val)}%;background:var(--pri);border-radius:99px"></div></div>
+    </div>`;
+  const stat = (label, val, unit = "") => `
+    <div style="flex:1;min-width:120px">
+      <div style="font-size:12px;color:var(--tx-2)">${esc(label)}</div>
+      <div style="font-size:22px;font-weight:700;margin-top:4px">${fmtNum(val)}<span style="font-size:12px;font-weight:400;color:var(--tx-2)"> ${esc(unit)}</span></div>
+    </div>`;
+
+  view.innerHTML = `
+    ${pageHead("学分体系", "已修学分 · 绩点 · 毕业进度")}
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;flex-wrap:wrap;gap:14px">
+        ${stat("当前学期已选", data.currentSelectedCredits, "学分")}
+        ${stat("当前学期已修", data.currentEarnedCredits, "学分")}
+        ${stat("累计总学分", data.totalEarnedCredits, "学分")}
+        ${stat("不及格学分", data.failedCredits, "学分")}
+        ${stat("总绩点", data.totalGpa)}
+        ${stat("平均绩点", data.avgGpa)}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <b>毕业要求（${esc(data.major || "—")} ${esc(data.grade || "")}级）</b>
+        <span style="color:var(--tx-2);font-size:13px">已修 ${fmtNum(data.totalEarnedCredits)} / 要求 ${fmtNum(data.gradTotalCredits)} · 还差 ${fmtNum(data.remainingCredits)} 学分</span>
+      </div>
+      ${bar(data.progressPercent, "毕业总进度")}
+      <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:14px">
+        ${stat("必修已修", data.requiredEarnedCredits, "学分")}
+        ${stat("选修已修", data.electiveEarnedCredits, "学分")}
+        ${stat("通识已修", data.genEduEarnedCredits, "学分")}
+      </div>
+      ${bar(data.requiredPercent, "必修进度（要求 " + fmtNum(data.gradRequiredCredits) + "）")}
+      ${bar(data.electivePercent, "选修进度（要求 " + fmtNum(data.gradElectiveCredits) + "）")}
+      ${bar(data.genEduPercent, "通识进度（要求 " + fmtNum(data.gradGenEduCredits) + "）")}
+    </div>`;
+}
+
+/* ---- 选课记录（按学期分组） ---- */
+export async function renderRecords(view) {
+  view.innerHTML = pageHead("选课记录", "历史选课 · 选课类型 · 状态 · 时间") + skeletonList(2);
+  const { data } = await api.studentRecords();
+  const items = data.items || [];
+  if (!items.length) {
+    view.innerHTML = pageHead("选课记录", "历史选课 · 选课类型 · 状态 · 时间") + emptyBox("暂无选课记录");
+    return;
+  }
+  const bySem = new Map();
+  items.forEach((r) => {
+    const k = r.semesterId == null ? "__none__" : String(r.semesterId);
+    if (!bySem.has(k)) bySem.set(k, []);
+    bySem.get(k).push(r);
+  });
+  const groups = [...bySem.entries()];
+  const statusTag = (s) => {
+    const map = { SELECTED: ["已选", "ok"], STUDYING: ["在读", "pri"], DROPPED: ["已退", "danger"], PENDING_SCORE: ["待录成绩", "warn"], ARCHIVED: ["已归档", ""] };
+    const [t, cls] = map[s] || [s || "已选", ""];
+    return `<span class="tag ${cls}">${esc(t)}</span>`;
+  };
+  view.innerHTML = `
+    ${pageHead("选课记录", "历史选课 · 选课类型 · 状态 · 时间")}
+    ${groups.map(([k, rows]) => `
+      <div class="card" style="margin-bottom:14px">
+        <div style="margin-bottom:10px"><b>${esc(k === "__none__" ? "未分学期" : "学期 " + k)}</b><span class="tag" style="margin-left:8px">${rows.length} 门</span></div>
+        <div style="overflow-x:auto"><table class="api-table">
+          <thead><tr><th>课程</th><th>学分</th><th>选课类型</th><th>状态</th><th>选课时间</th></tr></thead>
+          <tbody>${rows.map((r) => `
+            <tr>
+              <td><b>${esc(r.courseName || "")}</b><div class="sub" style="color:var(--tx-2);font-size:12px">${esc(r.code || "")} · ${esc(r.teacherName || "")}</div></td>
+              <td>${fmtNum(r.credits)}</td>
+              <td>${esc(r.selectType || "—")}</td>
+              <td>${statusTag(r.status)}</td>
+              <td style="white-space:nowrap">${esc(r.selectedAt || "—")}</td>
+            </tr>`).join("")}</tbody>
+        </table></div>
+      </div>`).join("")}`;
+}
+
+/* ---- 历史课表（按学期查询，复用周视图/列表视图） ---- */
+export async function renderTimetables(view) {
+  view.innerHTML = pageHead("历史课表", "按学期查询历史排课 · 周视图 / 列表视图") + skeletonList(2);
+  const { data } = await api.studentTimetables();
+  const sems = data.semesters || [];
+  if (!sems.length) {
+    view.innerHTML = pageHead("历史课表", "按学期查询历史排课 · 周视图 / 列表视图") + emptyBox("暂无历史课表");
+    return;
+  }
+  let idx = sems.length - 1;
+  let mode = "week";
+  view.innerHTML = `
+    ${pageHead("历史课表", "按学期查询历史排课 · 周视图 / 列表视图")}
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div class="chips" id="thSemChips">${sems.map((s, i) => `<button class="chip ${i === idx ? "on" : ""}" data-i="${i}">${esc(s.semesterName || ("学期 " + s.semesterId))}</button>`).join("")}</div>
+      <div class="chips" id="thModeChips">
+        <button class="chip on" data-m="week">周视图</button>
+        <button class="chip" data-m="list">列表视图</button>
+      </div>
+    </div>
+    <div id="thBody"></div>`;
+  const body = view.querySelector("#thBody");
+  const paint = () => {
+    const courses = (sems[idx].courses || []);
+    body.innerHTML = courses.length ? (mode === "week" ? weekGrid(courses) : listView(courses)) : emptyBox("该学期暂无排课");
+    view.querySelectorAll("#thSemChips .chip").forEach((x) => x.classList.toggle("on", Number(x.dataset.i) === idx));
+    view.querySelectorAll("#thModeChips .chip").forEach((x) => x.classList.toggle("on", x.dataset.m === mode));
+  };
+  view.querySelector("#thSemChips").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    idx = Number(b.dataset.i); paint();
+  });
+  view.querySelector("#thModeChips").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    mode = b.dataset.m; paint();
+  });
+  paint();
+}
+
+/* ---- 公告（置顶优先，点击展开） ---- */
+export async function renderAnnouncements(view) {
+  view.innerHTML = pageHead("公告", "教务公告 · 置顶优先") + skeletonList(2);
+  const { data } = await api.studentAnnouncements();
+  const items = data.items || [];
+  if (!items.length) {
+    view.innerHTML = pageHead("公告", "教务公告 · 置顶优先") + emptyBox("暂无公告");
+    return;
+  }
+  view.innerHTML = `${pageHead("公告", "教务公告 · 置顶优先")}<div class="card" id="anmList"></div>`;
+  const box = view.querySelector("#anmList");
+  let openIdx = -1;
+  const paint = () => {
+    box.innerHTML = items.map((a, i) => `
+      <div class="anm-item ${i === openIdx ? "open" : ""}" style="border-bottom:1px solid var(--bd);padding:12px 2px">
+        <button class="anm-head" data-i="${i}" type="button" style="width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;background:none;border:0;cursor:pointer;text-align:left">
+          <span style="font-weight:600">${a.isPinned ? '<span class="tag pri" style="margin-right:6px">置顶</span>' : ""}${esc(a.title)}</span>
+          <span style="color:var(--tx-2);font-size:12px;white-space:nowrap">${esc(a.publishedAt || "")}</span>
+        </button>
+        <div style="display:${i === openIdx ? "block" : "none"};margin-top:8px;padding:10px 12px;background:var(--n50);border-radius:8px;font-size:13px;line-height:1.7;white-space:pre-wrap">${esc(a.content || "")}</div>
+      </div>`).join("");
+    box.querySelectorAll(".anm-head").forEach((b) => (b.onclick = () => {
+      openIdx = openIdx === Number(b.dataset.i) ? -1 : Number(b.dataset.i);
+      paint();
+    }));
+  };
+  paint();
+}
+
+/* ================= 教师端 · 学业闭环（占位，后续批次开放） ================= */
+function teacherPlaceholder(view, title, sub) {
+  view.innerHTML = pageHead(title, sub) + `<div class="card" style="padding:40px;text-align:center;color:var(--tx-2)">该模块页面将在后续批次开放（后端接口已就绪）</div>`;
+}
+export async function renderGrade(view) { teacherPlaceholder(view, "成绩录入", "教师 · 课程成绩批量录入"); }
+export async function renderTstats(view) { teacherPlaceholder(view, "成绩统计", "教师 · 课程成绩统计分布"); }
+export async function renderTfailures(view) { teacherPlaceholder(view, "挂科名单", "教师 · 挂科与重修名单"); }
+export async function renderTtimetable(view) { teacherPlaceholder(view, "授课课表", "教师 · 本学期授课安排"); }
+
+/* ================= 教务端 · 学业闭环（占位，后续批次开放） ================= */
+function adminPlaceholder(view, title, sub) {
+  view.innerHTML = pageHead(title, sub) + `<div class="card" style="padding:40px;text-align:center;color:var(--tx-2)">该模块页面将在后续批次开放（后端接口已就绪）</div>`;
+}
+export async function renderAdminSemesters(view) { adminPlaceholder(view, "学期管理", "教务 · 学期创建 / 切换 / 归档"); }
+export async function renderAdminPlans(view) { adminPlaceholder(view, "培养方案", "教务 · 培养方案与毕业学分标准"); }
+export async function renderAdminCourses(view) { adminPlaceholder(view, "课程管理", "教务 · 课程维护与排课"); }
+export async function renderAdminScores(view) { adminPlaceholder(view, "成绩审核", "教务 · 成绩审核 / 驳回"); }
+export async function renderAdminCredits(view) { adminPlaceholder(view, "学分结算", "教务 · 学期学分结算"); }
+export async function renderAdminGraduation(view) { adminPlaceholder(view, "毕业统计", "教务 · 按专业年级统计毕业进度"); }
+export async function renderAdminAnnouncements(view) { adminPlaceholder(view, "公告管理", "教务 · 公告发布 / 下线"); }
+export async function renderAdminLogs(view) { adminPlaceholder(view, "操作日志", "教务 · 系统操作日志"); }

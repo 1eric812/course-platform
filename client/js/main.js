@@ -7,6 +7,13 @@ import {
   renderDashboard, renderCourses, renderWishlist, renderFlash,
   renderTimetable, renderMessages, renderSettings, renderArch, renderTeacher,
   renderAdminDashboard, renderAdminRules, renderAdminMonitor, renderAdminAnomalies,
+  /* 学业闭环 · 学生端 */
+  renderScores, renderScoreHistory, renderCredits, renderRecords, renderTimetables, renderAnnouncements,
+  /* 学业闭环 · 教师端 */
+  renderGrade, renderTstats, renderTfailures, renderTtimetable,
+  /* 学业闭环 · 教务端 */
+  renderAdminSemesters, renderAdminPlans, renderAdminCourses, renderAdminScores,
+  renderAdminCredits, renderAdminGraduation, renderAdminAnnouncements, renderAdminLogs,
   refreshBadge, clearViewTimers,
 } from "./views.js";
 
@@ -17,17 +24,34 @@ const NAV_STUDENT = [
   { key: "flash", label: "抢课专区", icon: "bolt" },
   { key: "timetable", label: "我的课表", icon: "calendar" },
   { key: "messages", label: "消息中心", icon: "bell", badge: "messages" },
+  { key: "scores", label: "成绩查询", icon: "courses" },
+  { key: "credits", label: "学分体系", icon: "arch" },
+  { key: "records", label: "选课记录", icon: "clock" },
+  { key: "timetables", label: "历史课表", icon: "calendar" },
+  { key: "announcements", label: "公告", icon: "bell" },
   { key: "settings", label: "个人中心", icon: "settings" },
 ];
 
 const NAV_TEACHER = [
   { key: "teacher", label: "教师工作台", icon: "courses" },
+  { key: "grade", label: "成绩录入", icon: "check" },
+  { key: "tstats", label: "成绩统计", icon: "arch" },
+  { key: "tfailures", label: "挂科名单", icon: "warn" },
+  { key: "ttimetable", label: "授课课表", icon: "calendar" },
   { key: "messages", label: "消息中心", icon: "bell", badge: "messages" },
   { key: "settings", label: "个人中心", icon: "settings" },
 ];
 
 const NAV_ADMIN = [
   { key: "admin", label: "教务工作台", icon: "home" },
+  { key: "adminSemesters", label: "学期管理", icon: "calendar" },
+  { key: "adminPlans", label: "培养方案", icon: "courses" },
+  { key: "adminCourses", label: "课程管理", icon: "courses" },
+  { key: "adminScores", label: "成绩审核", icon: "check" },
+  { key: "adminCredits", label: "学分结算", icon: "arch" },
+  { key: "adminGraduation", label: "毕业统计", icon: "arch" },
+  { key: "adminAnnouncements", label: "公告管理", icon: "bell" },
+  { key: "adminLogs", label: "操作日志", icon: "clock" },
   { key: "adminRules", label: "规则配置", icon: "settings" },
   { key: "adminMonitor", label: "运行监控", icon: "arch" },
   { key: "adminAnomalies", label: "异常处理", icon: "bell", badge: "anomalies" },
@@ -51,6 +75,26 @@ const ROUTES = {
   adminRules: renderAdminRules,
   adminMonitor: renderAdminMonitor,
   adminAnomalies: renderAdminAnomalies,
+  /* 学业闭环 · 学生端 */
+  scores: renderScores,
+  credits: renderCredits,
+  records: renderRecords,
+  timetables: renderTimetables,
+  announcements: renderAnnouncements,
+  /* 学业闭环 · 教师端 */
+  grade: renderGrade,
+  tstats: renderTstats,
+  tfailures: renderTfailures,
+  ttimetable: renderTtimetable,
+  /* 学业闭环 · 教务端 */
+  adminSemesters: renderAdminSemesters,
+  adminPlans: renderAdminPlans,
+  adminCourses: renderAdminCourses,
+  adminScores: renderAdminScores,
+  adminCredits: renderAdminCredits,
+  adminGraduation: renderAdminGraduation,
+  adminAnnouncements: renderAdminAnnouncements,
+  adminLogs: renderAdminLogs,
 };
 
 const TABBAR_KEYS = ["home", "courses", "wishlist", "timetable"];

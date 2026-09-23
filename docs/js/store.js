@@ -5,6 +5,7 @@ const state = {
   prefs: { theme: "light", density: "standard", timetableView: "week", compactFilter: false, fontScale: "standard", notify: { result: true, seat: true, system: true, drop: true } },
   me: null, // { accountId, user, accounts }
   courses: { items: [], total: 0, credits: 0, creditLimit: 30 },
+  creditLimit: 30, // 学分上限（后端 selection_rule 拉取后覆盖；首页据此渲染）
   filters: { keyword: "", category: new Set(), campus: new Set(), assessment: new Set(), credits: new Set(), days: new Set(), periods: new Set(), teacher: "", onlyNoConflict: false, onlyAvailable: false, sort: "default" },
   wishlist: [],
   seats: new Map(), // id -> remaining

@@ -1,6 +1,6 @@
 /* 后端 · 业务服务层：筛选、冲突检测、心愿单、选课受理 */
 
-import { db, CATEGORIES, currentTeacher, genRoster, adminState, resetDemo, phaseViews, updatePeriod as applyPeriod, currentPhase, nextPhase } from "./data.js";
+import { db, CATEGORIES, currentTeacher, genRoster, adminState, resetDemo, phaseViews, updatePeriod as applyPeriod, currentPhase, nextPhase, persistRules } from "./data.js";
 import { config } from "./config.js";
 
 // 静态版：浏览器没有 process，用模块加载时刻代替进程启动时刻
@@ -482,12 +482,21 @@ export function updatePeriod(code, patch = {}) {
 export function updateRules(patch = {}) {
   const r = adminState.rules;
   for (const k of ["selectionOpen", "allowCrossCampus", "blockOnConflict"]) if (k in patch) r[k] = !!patch[k];
+  /* 学分上限与心愿单上限的取值范围不同，别共用同一个钳制区间：
+   * 学分上限要允许教务配到 120 甚至更高（辅修 / 重修叠加场景），
+   * 心愿单上限则是个位数级别的列表容量。 */
+  const RANGE = { creditLimit: [1, 300], maxWishlist: [1, 60] };
   for (const k of ["creditLimit", "maxWishlist"]) {
     if (k in patch) {
       const v = Number(patch[k]);
-      if (!Number.isNaN(v)) r[k] = Math.max(1, Math.min(60, v | 0));
+      if (!Number.isNaN(v)) {
+        const [lo, hi] = RANGE[k];
+        r[k] = Math.max(lo, Math.min(hi, v | 0));
+      }
     }
   }
+  /* 落盘，否则刷新页面规则就被 loadRules() 打回默认值 */
+  persistRules();
   return r;
 }
 

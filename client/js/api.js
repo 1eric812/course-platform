@@ -191,11 +191,27 @@ export const api = {
   /* 课表导出（P-06-4） */
   exportIcs: () => window.open("/api/timetable.ics?token=" + encodeURIComponent(token || ""), "_blank"),
 
+  /* 学生端 · 学业闭环（学期 / 成绩 / 学分 / 选课记录 / 公告 / 历史课表） */
+  studentScores: (semesterId) => req("GET", "/api/student/scores" + (semesterId ? "?semesterId=" + semesterId : "")),
+  studentScoreHistory: () => req("GET", "/api/student/score-history"),
+  studentCredits: () => req("GET", "/api/student/credits"),
+  studentRecords: (semesterId) => req("GET", "/api/student/records" + (semesterId ? "?semesterId=" + semesterId : "")),
+  studentAnnouncements: () => req("GET", "/api/student/announcements"),
+  studentTimetables: (semesterId) => req("GET", "/api/student/timetables" + (semesterId ? "?semesterId=" + semesterId : "")),
+
   /* 教师端 */
   teacherMe: () => req("GET", "/api/teacher/me"),
   teacherCourses: () => req("GET", "/api/teacher/courses"),
   roster: (id) => req("GET", `/api/teacher/courses/${id}/roster`),
   updateCourse: (id, patch) => req("PUT", `/api/teacher/courses/${id}`, patch),
+
+  /* 教师端 · 学业闭环（概览 / 成绩录入 / 统计 / 挂科 / 课表） */
+  teacherOverview: () => req("GET", "/api/teacher/overview"),
+  teacherCourseScores: (courseId) => req("GET", `/api/teacher/courses/${courseId}/scores`),
+  teacherSaveScores: (courseId, items) => req("PUT", `/api/teacher/courses/${courseId}/scores`, { items }),
+  teacherCourseStats: (courseId) => req("GET", `/api/teacher/courses/${courseId}/stats`),
+  teacherFailures: (courseId) => req("GET", `/api/teacher/courses/${courseId}/failures`),
+  teacherTimetable: () => req("GET", "/api/teacher/timetable"),
 
   /* 教务管理端 */
   adminOverview: () => req("GET", "/api/admin/overview"),
@@ -208,4 +224,30 @@ export const api = {
   resolveAnomaly: (id, action) => req("POST", `/api/admin/anomalies/${id}/resolve`, { action }),
   adjustSeats: (id, delta) => req("POST", `/api/admin/courses/${id}/seats`, { delta }),
   adminReset: () => req("POST", "/api/admin/reset", {}),
+
+  /* 教务端 · 学业闭环（学期 / 培养方案 / 课程 / 成绩审核 / 学分结算 / 毕业统计 / 公告 / 日志） */
+  adminSemesters: () => req("GET", "/api/admin/semesters"),
+  adminCreateSemester: (body) => req("POST", "/api/admin/semesters", body),
+  adminUpdateSemester: (id, body) => req("PUT", `/api/admin/semesters/${id}`, body),
+  adminArchiveSemester: (id) => req("POST", `/api/admin/semesters/${id}/archive`, {}),
+  adminTrainingPlans: () => req("GET", "/api/admin/training-plans"),
+  adminCreateTrainingPlan: (body) => req("POST", "/api/admin/training-plans", body),
+  adminUpdateTrainingPlan: (id, body) => req("PUT", `/api/admin/training-plans/${id}`, body),
+  adminCourses: () => req("GET", "/api/admin/courses"),
+  adminCreateCourse: (body) => req("POST", "/api/admin/courses", body),
+  adminUpdateCourse: (id, body) => req("PUT", `/api/admin/courses/${id}`, body),
+  adminScores: (semesterId, status) => {
+    const p = new URLSearchParams();
+    if (semesterId) p.set("semesterId", semesterId);
+    if (status) p.set("status", status);
+    const s = p.toString();
+    return req("GET", "/api/admin/scores" + (s ? "?" + s : ""));
+  },
+  adminAuditScore: (id, action) => req("PUT", `/api/admin/scores/${id}/audit`, { action }),
+  adminCreditsSettle: (semesterId) => req("POST", "/api/admin/credits/settle", { semesterId }),
+  adminGraduation: () => req("GET", "/api/admin/graduation"),
+  adminAnnouncements: () => req("GET", "/api/admin/announcements"),
+  adminCreateAnnouncement: (body) => req("POST", "/api/admin/announcements", body),
+  adminUpdateAnnouncement: (id, body) => req("PUT", `/api/admin/announcements/${id}`, body),
+  adminLogs: () => req("GET", "/api/admin/logs"),
 };

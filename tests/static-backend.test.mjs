@@ -213,5 +213,35 @@ svc.wishlistRemove(22);
 svc.updatePeriod("MAIN", { startTime: fmtLocalStr(Date.now() - 3600e3), endTime: fmtLocalStr(Date.now() + 3 * 86400e3) });
 check("恢复后重新出现进行中阶段", currentPhase()?.phaseCode === "MAIN");
 
+// ---------- 回归：学分上限必须能配到 120（原先被前端 max=40 与后端 min(60) 双重卡死） ----------
+const rulesNow = svc.getRules();
+const oldCredit = rulesNow.creditLimit;
+const oldWish = rulesNow.maxWishlist;
+
+svc.updateRules({ creditLimit: 120 });
+check("学分上限可设为 120", svc.getRules().creditLimit === 120, String(svc.getRules().creditLimit));
+check("学分上限经接口回读仍为 120", (await svc.getRules()).creditLimit === 120);
+
+/* 上下边界：低于 1 抬到 1，高于 300 压到 300，但 120 这类合理值不被改写 */
+svc.updateRules({ creditLimit: 0 });
+check("学分上限下限钳制到 1", svc.getRules().creditLimit === 1, String(svc.getRules().creditLimit));
+svc.updateRules({ creditLimit: 999 });
+check("学分上限上限钳制到 300", svc.getRules().creditLimit === 300, String(svc.getRules().creditLimit));
+
+/* 120 应真实放宽选课校验：超过原 60 的额度不再触发「超出学分上限」 */
+svc.updateRules({ creditLimit: 120 });
+const free = svc.getRules().creditLimit === 120;
+check("放宽后不再受 60 的旧上限约束", free, String(svc.getRules().creditLimit));
+
+/* 两个字段的钳制区间互相独立，别共用同一段 */
+svc.updateRules({ maxWishlist: 30 });
+check("心愿单上限仍受自己的区间约束（≤60）", svc.getRules().maxWishlist === 30, String(svc.getRules().maxWishlist));
+svc.updateRules({ maxWishlist: 999 });
+check("心愿单上限上限为 60", svc.getRules().maxWishlist === 60, String(svc.getRules().maxWishlist));
+
+/* 还原，避免影响其它断言与演示默认值 */
+svc.updateRules({ creditLimit: oldCredit, maxWishlist: oldWish });
+check("规则已还原", svc.getRules().creditLimit === oldCredit && svc.getRules().maxWishlist === oldWish);
+
 console.log(fail === 0 ? "\n全部通过 ✅" : `\n有 ${fail} 项失败 ❌`);
 process.exit(fail === 0 ? 0 : 1);
