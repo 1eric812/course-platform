@@ -1,7 +1,7 @@
 /* 前端 · 应用引导：导航、路由、全局事件 */
 
 import { api, auth } from "./api.js";
-import { store, applyPrefs } from "./store.js";
+import { store, applyPrefs, resolveTheme, watchSystemTheme } from "./store.js";
 import { icon, toast, esc, confirmDialog } from "./ui.js";
 import {
   renderDashboard, renderCourses, renderWishlist, renderFlash,
@@ -63,7 +63,8 @@ const BACKEND_HINT = "请确认后端已启动：cd server-java && mvn clean pac
 function currentRoute() {
   const role = store.get().role;
   const h = location.hash.replace(/^#\//, "") || homeFor(role);
-  const valid = navFor(role).some((n) => n.key === h);
+  /* 个人中心对所有角色开放（教师 / 教务也需要退出登录与偏好设置入口） */
+  const valid = h === "settings" || navFor(role).some((n) => n.key === h);
   return valid ? h : homeFor(role);
 }
 
@@ -100,6 +101,8 @@ function closeSidenav() {
 
 async function render() {
   clearViewTimers();
+  document.body.classList.remove("drawer-lock"); // 路由切换时释放移动端抽屉的滚动锁（A-03/A-05）
+  closeUserMenu();
   const r = currentRoute();
   syncActive();
   const view = document.getElementById("view");
@@ -111,21 +114,6 @@ async function render() {
   }
   window.scrollTo(0, 0);
   refreshBadge();
-}
-
-/* ---------- 顶部倒计时（模块级守卫：重复登录不再叠加定时器） ---------- */
-let topTimer = null;
-function startTopCountdown() {
-  if (topTimer) return;
-  topTimer = setInterval(() => {
-    const node = document.getElementById("topCountdownText");
-    const openAt = store.get().openAt;
-    if (!node || !openAt) return;
-    const diff = openAt - Date.now();
-    if (diff <= 0) { node.textContent = "已开放"; return; }
-    const s = Math.floor(diff / 1000);
-    node.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  }, 1000);
 }
 
 /* ---------- 全局搜索（含关键词联想 P-02-3；桌面输入框与移动端搜索行共用） ---------- */
@@ -295,9 +283,11 @@ function restorePendingLogin() {
   if (pass) pass.focus();
 }
 
-/* ---------- 主题切换（顶部按钮与账号下拉共用） ---------- */
+/* ---------- 主题切换（顶部按钮与账号下拉共用） ----------
+ * 顶部按钮为"快捷反转"：按当前实际着色在浅色/深色之间切换；
+ * "跟随系统"作为第三种模式在个人中心选择（V-06 / P-08-2）。 */
 function syncThemeLabel() {
-  const dark = store.get().prefs.theme === "dark";
+  const dark = resolveTheme(store.get().prefs.theme) === "dark";
   const t = document.getElementById("themeToggleText");
   if (t) t.textContent = dark ? "浅色" : "深色";
   const btn = document.getElementById("themeToggle");
@@ -305,7 +295,7 @@ function syncThemeLabel() {
 }
 
 async function toggleTheme() {
-  const next = store.get().prefs.theme === "dark" ? "light" : "dark";
+  const next = resolveTheme(store.get().prefs.theme) === "dark" ? "light" : "dark";
   store.setPrefs({ theme: next });
   syncThemeLabel();
   toast(next === "dark" ? "已切换深色模式" : "已切换浅色模式", "", "ok", 1200);
@@ -329,7 +319,15 @@ function setLoginRole(role) {
   if (hint) hint.textContent = ROLE_HINT[role];
 }
 
+/* A-07 登录前后上下文保持：被会话拦截时记住目标路由，登录成功后原路返回，
+ * 避免用户在抢课高峰期重新一路点回原页面。 */
+let returnHash = "";
+
 function showLogin() {
+  try {
+    const h = location.hash.replace(/^#\/?/, "");
+    if (h && h !== "login" && !returnHash) returnHash = "#/" + h;
+  } catch (e) { /* 忽略 */ }
   document.getElementById("loginScreen").hidden = false;
   const err = document.getElementById("loginErr");
   if (err) err.textContent = "";
@@ -367,6 +365,12 @@ async function doLogin() {
     store.setRole(roleMap[s.role] || "student");
     renderRoleBadge();
     hideLogin();
+    /* 登录成功 → 回到被拦截前的页面（A-07） */
+    if (returnHash && location.hash !== returnHash) {
+      const h = returnHash;
+      returnHash = "";
+      location.hash = h;
+    }
     await bootApp();
   } catch (e) {
     err.textContent = "无法连接后端。" + BACKEND_HINT;
@@ -378,9 +382,8 @@ async function doLogout() {
   try { await api.logout(); } catch (e) { /* 忽略 */ }
   auth.setToken(null);
   store.setToken(null);
-  store.setSession(null);
+  store.resetVolatile(); // I-09：退出登录即清空列表/心愿单/筛选，防下一账号看到上一账号数据
   document.getElementById("view").innerHTML = "";
-  store.setRole("student");
   renderRoleBadge();
   setLoginRole("STUDENT");
   document.getElementById("loginUser").value = "";
@@ -392,12 +395,12 @@ async function boot() {
   // 会话失效（401）时自动回到登录页
   auth.onUnauthorized(() => {
     if (!store.get().token) return;
-    auth.setToken(null); store.setToken(null); store.setSession(null);
+    auth.setToken(null); store.setToken(null);
+    store.resetVolatile(); // I-09：会话失效同样需要清空个人数据，避免残留展示
     document.getElementById("view").innerHTML = "";
-    store.setRole("student");
     renderRoleBadge();
     showLogin();
-    toast("登录已过期，请重新登录", "", "warn", 2500);
+    toast("登录已过期，请重新登录", "登录后将回到你刚才的页面", "warn", 2500);
   });
 
   // 登录页交互
@@ -442,6 +445,8 @@ async function bootApp() {
 
   document.getElementById("themeToggle").onclick = () => toggleTheme();
 
+  bindPullRefresh(); // A-06：移动端下拉刷新（与页面内显式刷新按钮并存）
+
   bindSearch();
   window.addEventListener("hashchange", () => { closeUserMenu(); render(); });
 
@@ -455,9 +460,68 @@ async function bootApp() {
     toast("无法连接后端", BACKEND_HINT, "danger", 4000);
   }
 
-  startTopCountdown();
   await loadMe();
   await render();
+}
+
+/* ---------- 移动端下拉刷新（A-06） ----------
+ * 仅在手机宽度、页面已在顶部、且无抽屉/弹窗打开时生效，
+ * 与"抢课专区/课程中心"里的显式刷新按钮并存：一个手势、一个可点。 */
+function bindPullRefresh() {
+  const ind = document.getElementById("ptr");
+  if (!ind) return;
+  const mq = window.matchMedia("(max-width: 767px)");
+  const THRESHOLD = 56;
+  let startY = 0, dist = 0, pulling = false;
+
+  const setInd = (d) => {
+    if (d <= 0) { ind.style.transform = ""; ind.classList.remove("ready"); return; }
+    ind.style.transform = `translateY(${Math.min(d, 64)}px)`;
+    ind.classList.toggle("ready", d >= THRESHOLD);
+    const t = ind.querySelector(".ptr-text");
+    if (t) t.textContent = d >= THRESHOLD ? "松开刷新" : "下拉刷新";
+  };
+
+  const blocked = () => !mq.matches
+    || document.body.classList.contains("drawer-lock")
+    || !document.getElementById("loginScreen").hidden
+    || !document.getElementById("modalRoot").hidden
+    || document.getElementById("modalRoot").children.length > 0;
+
+  window.addEventListener("touchstart", (e) => {
+    if (blocked()) return;
+    if (window.scrollY > 0 || document.documentElement.scrollTop > 0) return;
+    startY = e.touches[0].clientY;
+    dist = 0;
+    pulling = true;
+  }, { passive: true });
+
+  window.addEventListener("touchmove", (e) => {
+    if (!pulling) return;
+    if (window.scrollY > 0 || document.documentElement.scrollTop > 0) { dist = 0; setInd(0); return; }
+    const d = e.touches[0].clientY - startY;
+    if (d <= 0) { dist = 0; setInd(0); return; }
+    dist = d * 0.5; // 阻尼系数，避免下拉过于灵敏
+    setInd(dist);
+  }, { passive: true });
+
+  window.addEventListener("touchend", () => {
+    if (!pulling) return;
+    pulling = false;
+    if (dist >= THRESHOLD) {
+      ind.classList.add("spin");
+      setInd(64);
+      const t = ind.querySelector(".ptr-text");
+      if (t) t.textContent = "正在刷新…";
+      setTimeout(() => {
+        render();
+        ind.classList.remove("spin");
+        setInd(0);
+        toast("已刷新", "", "ok", 1000);
+      }, 420);
+    } else setInd(0);
+    dist = 0;
+  });
 }
 
 boot();

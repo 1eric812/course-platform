@@ -55,7 +55,7 @@ function updateCredit(used, limit) {
 
 /* ================= 首页工作台 ================= */
 export async function renderDashboard(view) {
-  view.innerHTML = pageHead("首页工作台", "待办、倒计时与快捷入口") + skeletonList(2);
+  view.innerHTML = pageHead("首页工作台", "待办、时间状态与快捷入口") + skeletonList(2);
   const [status, tt, wish, msgs] = await Promise.all([
     api.status(), api.timetable(), api.wishlist(), api.messages(),
   ]);
@@ -63,15 +63,16 @@ export async function renderDashboard(view) {
   /* P-01-1 选课节点：current=当前进行中，否则取最近一个未结束的阶段 */
   const phases = status.data.phases || [];
   const cur = phases.find((x) => x.current) || phases.find((x) => x.status !== "FINISHED") || null;
+  const phaseLabel = cur ? `${cur.name}${cur.current ? "（进行中）" : "（待开始）"}` : "未设置时间节点";
   store.setWishlist(wish.data.items);
   store.setUnread(msgs.data.items.filter((m) => !m.read).length);
   const c = tt.data;
   const s = store.get();
 
   view.innerHTML = `
-    ${pageHead("首页工作台", "待办、倒计时与快捷入口")}
+    ${pageHead("首页工作台", "待办、时间状态与快捷入口")}
     <div class="grid g4" style="margin-bottom:14px">
-      <div class="stat"><div class="v" id="dashCountdown">--</div><div class="l">距${esc(cur ? cur.name : "选课")}开放</div></div>
+      <div class="stat"><div class="v">${phaseLabel}</div><div class="l">选课时间状态</div></div>
       <div class="stat"><div class="v">${c.courses.length}</div><div class="l">已选课程</div></div>
       <div class="stat"><div class="v">${c.totalCredits}</div><div class="l">已选学分（上限 ${s.courses.creditLimit || 30}）</div></div>
       <div class="stat"><div class="v">${wish.data.items.length}</div><div class="l">心愿单待提交</div></div>
@@ -80,8 +81,8 @@ export async function renderDashboard(view) {
     ${phases.length ? `
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <h2 style="font-size:var(--fs-h2)">选课节点</h2>
-        <span class="tag" style="color:${cur && cur.current ? "var(--ok)" : "var(--tx-3)"}">${esc(cur ? cur.name + (cur.current ? " 进行中" : " 未开始") : "待开放")}</span>
+        <h2 style="font-size:var(--fs-h2)">选课时间节点</h2>
+        <span class="tag" style="color:${cur && cur.current ? "var(--ok)" : "var(--tx-3)"}">${esc(cur ? cur.name + (cur.current ? " 进行中" : " 待开始") : "待开放")}</span>
       </div>
       ${phases.map((x) => `
         <div class="tt-item">
@@ -123,23 +124,6 @@ export async function renderDashboard(view) {
     </div>`;
 
   view.querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => location.hash = "#/" + b.dataset.nav));
-  updateCountdown("dashCountdown");
-  tick(() => updateCountdown("dashCountdown"), 1000);
-}
-
-function updateCountdown(elId) {
-  const node = document.getElementById(elId);
-  const openAt = store.get().openAt;
-  if (!node || !openAt) return;
-  const diff = openAt - Date.now();
-  if (diff <= 0) { node.textContent = "已开放"; node.style.color = "var(--ok)"; return; }
-  const s = Math.floor(diff / 1000);
-  const mm = String(Math.floor(s / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  node.textContent = `${mm}:${ss}`;
-  /* P-01-1：倒计时进入最后 1 小时提高视觉权重 */
-  node.style.color = diff <= 3600000 ? "var(--danger-t)" : "";
-  node.style.fontWeight = diff <= 3600000 ? "700" : "";
 }
 
 /* P-01-1 选课节点：阶段起止时间的紧凑展示（MM-DD HH:mm） */
@@ -176,6 +160,33 @@ function activeFilterTags() {
   return tags;
 }
 
+/* I-04 / P-05-2 名额实时更新：数值变化时高亮脉冲，并联动余量档位配色与进度条，
+ * 让"名额变了"这件事被看见。课程中心与抢课专区共用同一实现，避免两处逻辑漂移。 */
+function applySeatUpdate(payload) {
+  if (!payload || payload.type !== "seats") return;
+  const map = new Map(payload.seats.map((s) => [s.id, Number(s.remaining)]));
+  document.querySelectorAll("[data-seat]").forEach((n) => {
+    const id = Number(n.dataset.seat);
+    if (!map.has(id)) return;
+    const next = map.get(id);
+    if (String(n.textContent) !== String(next)) {
+      n.textContent = next;
+      n.classList.add("pulse");
+      setTimeout(() => n.classList.remove("pulse"), 1400);
+    }
+    const low = next > 0 && next <= 8;
+    n.classList.toggle("low", low);
+    n.classList.toggle("zero", next === 0);
+    const bar = n.parentElement && n.parentElement.querySelector(".seat-bar i");
+    const cap = Number(n.dataset.cap || 0);
+    if (bar && cap > 0) {
+      bar.style.width = Math.round((next / cap) * 100) + "%";
+      bar.classList.toggle("low", low);
+      bar.classList.toggle("zero", next === 0);
+    }
+  });
+}
+
 export async function renderCourses(view) {
   if (!filterCache) filterCache = (await api.filters()).data;
   const f = store.get().filters;
@@ -186,6 +197,7 @@ export async function renderCourses(view) {
       <div class="f-head">
         <span class="f-head-title">${icon("filter", 18)} 筛选条件<span class="f-count" id="fCount" hidden></span></span>
         <div class="f-head-actions">
+          <button class="btn sm" id="refreshCourses" type="button">${icon("refresh", 16)} 刷新名额</button>
           <button class="btn sm f-toggle" id="filterToggle" type="button" aria-expanded="true" aria-controls="filterRows">收起筛选</button>
           <button class="btn sm" id="clearFilters" type="button">清空筛选</button>
         </div>
@@ -215,10 +227,12 @@ export async function renderCourses(view) {
           <option value="credits">按学分</option>
         </select>
       </div>
+      <div class="f-done"><button class="btn primary" id="filterDone" type="button">完成并查看结果</button></div>
       </div><!-- /f-rows 移动端折叠区 -->
       <div class="ftag-row" id="ftagRow"></div>
       <div class="f-summary" id="fSummary"></div>
     </div>
+    <div class="f-scrim" id="fScrim" hidden></div>
     <div class="course-list" id="courseList">${skeletonList(6)}</div>`;
 
   syncFilterUI();
@@ -270,15 +284,12 @@ export async function renderCourses(view) {
 
   await reload();
 
+  /* 显著的刷新控件（I-04）：随时可手动核对名额，不必依赖自动推送 */
+  const rf = view.querySelector("#refreshCourses");
+  if (rf) rf.onclick = async () => { await reload(); toast("名额已刷新", "已按最新余量重排", "ok", 1200); };
+
   // 实时名额更新（SSE，断线自动降级轮询）
-  watchSeats((payload) => {
-    if (payload.type !== "seats") return;
-    const map = new Map(payload.seats.map((s) => [s.id, s.remaining]));
-    document.querySelectorAll("[data-seat]").forEach((n) => {
-      const id = Number(n.dataset.seat);
-      if (map.has(id)) n.textContent = map.get(id);
-    });
-  });
+  watchSeats(applySeatUpdate);
 }
 
 function renderFtags() {
@@ -303,11 +314,16 @@ function renderFtags() {
   updateFilterChrome();
 }
 
-/* 移动端筛选区折叠（P-01-6）：小屏默认收起，仅留"筛选条件"摘要条，避免筛选区把课程列表挤出首屏 */
+/* 移动端筛选区（P-01-6 / A-03 / A-05）：
+ * - 小屏默认收起，仅留"筛选条件"摘要条，避免筛选区把课程列表挤出首屏；
+ * - 展开时升级为底部抽屉：只占约 2/3 屏高、可滚动、带遮罩与"完成"按钮，
+ *   保证筛选、查看结果在拇指可及的范围内完成，且不会误触背景。 */
 function bindFilterPanel() {
   const panel = document.getElementById("filterPanel");
   const toggle = document.getElementById("filterToggle");
   const rows = document.getElementById("filterRows");
+  const scrim = document.getElementById("fScrim");
+  const done = document.getElementById("filterDone");
   if (!panel || !toggle || !rows) return;
   const mq = window.matchMedia("(max-width: 900px)");
   let open = !mq.matches;
@@ -317,7 +333,11 @@ function bindFilterPanel() {
     if (!mobile) open = true;
     toggle.hidden = !mobile;
     rows.hidden = !open;
+    const drawer = mobile && open;
     panel.classList.toggle("collapsed", !open);
+    panel.classList.toggle("drawer", drawer);
+    document.body.classList.toggle("drawer-lock", drawer);
+    if (scrim) scrim.hidden = !drawer;
     toggle.setAttribute("aria-expanded", String(open));
     toggle.textContent = open ? "收起筛选" : "展开筛选";
     updateFilterChrome();
@@ -325,6 +345,8 @@ function bindFilterPanel() {
 
   apply();
   toggle.onclick = () => { open = !open; apply(); };
+  if (done) done.onclick = () => { open = false; apply(); };   // 一次点击回到结果列表
+  if (scrim) scrim.onclick = () => { open = false; apply(); };
   const onMq = () => { open = !mq.matches; apply(); };
   if (mq.addEventListener) mq.addEventListener("change", onMq); else mq.addListener(onMq);
 }
@@ -541,24 +563,32 @@ function pollTicket(ticketId, firstTicket) {
 
 /* ================= 抢课专区 ================= */
 export async function renderFlash(view) {
-  view.innerHTML = pageHead("抢课专区", "倒计时 · 实时名额 · 目标监控 · 异常可重试") + skeletonList(2);
+  view.innerHTML = pageHead("抢课专区", "时间状态 · 实时名额 · 目标监控 · 异常可重试") + skeletonList(2);
+  let currentPhase = null;
   try {
     const status = await api.status();
+    const phases = status.data.phases || [];
+    currentPhase = phases.find((x) => x.current) || phases.find((x) => x.status !== "FINISHED") || null;
     store.get().openAt = status.data.openAt;
-  } catch (e) { /* 倒计时容忍失败 */ }
+  } catch (e) { /* 选课状态接口可容忍失败 */ }
+
+  const phaseText = currentPhase ? `${currentPhase.name}${currentPhase.current ? "（进行中）" : "（待开始）"}` : "未设置选课活动";
+  const phaseSpan = currentPhase ? `${String(currentPhase.start || "").slice(5, 16)} ~ ${String(currentPhase.end || "").slice(5, 16)}` : "待配置时间节点";
 
   view.innerHTML = `
-    ${pageHead("抢课专区", "倒计时 · 实时名额 · 目标监控 · 异常可重试")}
+    ${pageHead("抢课专区", "时间状态 · 实时名额 · 目标监控 · 异常可重试")}
     <div class="card" style="text-align:center;padding:22px">
-      <div style="font-size:var(--fs-2);color:var(--tx-2)">距选课开放</div>
-      <div id="flashCd" style="font-size:44px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--pri)">--:--</div>
-      <div style="font-size:var(--fs-2);color:var(--tx-3)">名额实时推送，延迟 ≤ 1s</div>
+      <div style="font-size:var(--fs-2);color:var(--tx-2)">当前选课阶段</div>
+      <div style="font-size:36px;font-weight:600;line-height:1.2;margin:8px 0;color:var(--pri)">${esc(phaseText)}</div>
+      <div style="font-size:var(--fs-2);color:var(--tx-3)">${esc(phaseSpan)}</div>
+      <div id="flashCd" class="cd-line" aria-live="polite"></div>
       <div style="margin-top:12px"><button class="btn" id="flashRefresh">${icon("refresh", 18)} 手动刷新名额</button></div>
     </div>
     <div class="card">
       <h2 style="font-size:var(--fs-h2);margin-bottom:10px">名额监控（实时）</h2>
       <div id="flashList">${skeletonList(3)}</div>
-    </div>`;
+    </div>
+    <button class="fab-refresh" id="flashFab" type="button" aria-label="刷新名额">${icon("refresh", 20)}<span>刷新</span></button>`;
 
   const listEl = view.querySelector("#flashList");
   const renderList = (items) => {
@@ -569,7 +599,7 @@ export async function renderFlash(view) {
           <div class="wl-name">${esc(c.name)} <span class="cc-code">${esc(c.code)}</span></div>
           <div class="wl-sub">${esc(scheduleText(c))} · ${esc(c.teacher)}</div>
         </div>
-        <div class="seat"><div class="n ${c.remaining <= 8 ? "low" : ""}" data-seat="${c.id}">${c.remaining}</div><div class="c">剩余</div></div>
+        <div class="seat"><div class="n ${c.remaining === 0 ? "zero" : c.remaining <= 8 ? "low" : ""}" data-seat="${c.id}">${c.remaining}</div><div class="c">剩余</div></div>
         ${c.remaining === 0
           ? `<button class="btn sm ${c.subscribed ? "subscribed" : ""}" data-sub="${c.id}">${icon("bell", 16)} ${c.subscribed ? "已订阅" : "订阅放号"}</button>`
           : `<button class="btn sm primary" data-add="${c.id}">${icon("plus", 16)} 抢</button>`}
@@ -604,19 +634,40 @@ export async function renderFlash(view) {
   };
   await load();
 
-  view.querySelector("#flashRefresh").onclick = async () => { await load(); toast("已刷新", "", "ok", 1200); };
+  /* P-05-1 倒计时与最后 60 秒强调：开放瞬间是抢课峰值，提前给出明确的心理预期与行动信号 */
+  const cdEl = view.querySelector("#flashCd");
+  if (cdEl) {
+    const upd = () => {
+      const openAt = Number(store.get().openAt || 0);
+      const diff = openAt - Date.now();
+      if (openAt && diff > 0) {
+        const d = Math.floor(diff / 86400000);
+        const h = Math.floor((diff % 86400000) / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        const s = Math.floor((diff % 60000) / 1000);
+        const urgent = diff <= 60000;
+        cdEl.classList.toggle("urgent", urgent);
+        cdEl.innerHTML = urgent
+          ? `距开放不足 1 分钟，请做好准备！<br><b>${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}</b>`
+          : `距开放还有 <b>${d ? d + " 天 " : ""}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}</b>`;
+      } else if (openAt && diff > -600000) {
+        cdEl.classList.remove("urgent");
+        cdEl.textContent = "已开放 · 名额实时刷新中";
+      } else {
+        cdEl.classList.remove("urgent");
+        cdEl.textContent = currentPhase && currentPhase.current ? "选课进行中" : "暂未配置开放时间";
+      }
+    };
+    upd();
+    tick(upd, 1000);
+  }
 
-  const cd = () => updateCountdown("flashCd");
-  cd(); tick(cd, 500);
+  const onRefresh = async () => { await load(); toast("已刷新", "名额已按最新余量更新", "ok", 1200); };
+  view.querySelector("#flashRefresh").onclick = onRefresh;
+  const fab = view.querySelector("#flashFab");
+  if (fab) fab.onclick = onRefresh;
 
-  watchSeats((payload) => {
-    if (payload.type !== "seats") return;
-    const map = new Map(payload.seats.map((s) => [s.id, s.remaining]));
-    document.querySelectorAll("[data-seat]").forEach((n) => {
-      const id = Number(n.dataset.seat);
-      if (map.has(id)) n.textContent = map.get(id);
-    });
-  });
+  watchSeats(applySeatUpdate);
 }
 
 /* ================= 我的课表 ================= */
@@ -652,6 +703,20 @@ export async function renderTimetable(view) {
     else {
       body.innerHTML = dayFlow(data.courses, activeDay);
       body.querySelectorAll("[data-day]").forEach((b) => (b.onclick = () => { activeDay = Number(b.dataset.day); render(); }));
+      const step = (delta) => { activeDay = ((activeDay + delta - 1 + 7) % 7) + 1; render(); };
+      const l = body.querySelector("#ttDayPrev"), r = body.querySelector("#ttDayNext");
+      if (l) l.onclick = () => step(-1);
+      if (r) r.onclick = () => step(1);
+      /* A-06 移动端手势：左右滑动切换日期，避免每次都要点按 */
+      let sx = null, sy = null;
+      body.addEventListener("touchstart", (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+      body.addEventListener("touchend", (e) => {
+        if (sx === null) return;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - sx, dy = t.clientY - sy;
+        sx = null; sy = null;
+        if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
+      }, { passive: true });
     }
   };
   render();
@@ -679,10 +744,14 @@ function dayFlow(courses, day) {
   courses.forEach((c) => c.schedule.forEach((sch) => { if (sch.day === day) items.push({ c, sch }); }));
   items.sort((a, b) => a.sch.start - b.sch.start);
   return `
-    <div class="day-tabs">${[1, 2, 3, 4, 5, 6, 7].map((d) => {
-      const n = dayCount(courses, d);
-      return `<button class="day-tab ${d === day ? "on" : ""}" data-day="${d}"><span>周${DAYS[d - 1]}</span><span class="d">${n ? n + " 节" : "休息"}</span></button>`;
-    }).join("")}</div>
+    <div class="day-nav">
+      <button class="btn sm" id="ttDayPrev" type="button" aria-label="前一天">‹ 前一天</button>
+      <div class="day-tabs">${[1, 2, 3, 4, 5, 6, 7].map((d) => {
+        const n = dayCount(courses, d);
+        return `<button class="day-tab ${d === day ? "on" : ""}" data-day="${d}"><span>周${DAYS[d - 1]}</span><span class="d">${n ? n + " 节" : "休息"}</span></button>`;
+      }).join("")}</div>
+      <button class="btn sm" id="ttDayNext" type="button" aria-label="后一天">后一天 ›</button>
+    </div>
     ${items.length ? `<div class="tt-day">${items.map(({ c, sch }) => `
         <div class="tt-item"><span class="p">第 ${sch.start}-${sch.end} 节</span><span><b>${esc(c.name)}</b> · ${esc(c.teacher)} · ${esc(c.place)} · ${esc(c.campus)}</span></div>`).join("")}</div>`
       : emptyBox(`周${DAYS[day - 1]}没有课，好好休息`)}`;
@@ -809,7 +878,9 @@ export async function renderSettings(view) {
         <div class="chips" id="themeChips">
           <button class="chip ${s.prefs.theme === "light" ? "on" : ""}" data-v="light">浅色</button>
           <button class="chip ${s.prefs.theme === "dark" ? "on" : ""}" data-v="dark">深色</button>
+          <button class="chip ${s.prefs.theme === "system" ? "on" : ""}" data-v="system">跟随系统</button>
         </div>
+        <p class="hint-text">"跟随系统"会自动适配操作系统深浅色外观；手动选择浅色 / 深色可覆盖系统设置。</p>
       </div>
       <div class="f-group" style="margin-top:14px"><span class="f-label">字体大小（四档，即时生效）</span>
         <div class="chips" id="fontChips">

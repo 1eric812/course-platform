@@ -13,7 +13,8 @@
 try {
   var p = JSON.parse(localStorage.getItem("cp_prefs") || "{}");
   var r = document.documentElement;
-  r.setAttribute("data-theme", p.theme === "dark" ? "dark" : "light");
+  var sysDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  r.setAttribute("data-theme", (p.theme === "dark" || (p.theme === "system" && sysDark)) ? "dark" : "light");
   r.setAttribute("data-density", ["compact", "loose"].indexOf(p.density) >= 0 ? p.density : "standard");
   r.setAttribute("data-font", ["small", "large", "xlarge"].indexOf(p.fontScale) >= 0 ? p.fontScale : "standard");
 } catch (e) { /* 缓存异常时忽略，保持默认外观 */ }
@@ -41,7 +42,6 @@ try {
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="icon-btn-text">退出</span>
     </button>
-    <div class="countdown-chip" title="距选课开放"><span class="cd-dot" aria-hidden="true"></span><span id="topCountdownText">--:--</span></div>
     <div class="user-chip" id="userChip" title="当前账号（点击查看身份与切换）" aria-haspopup="menu" aria-expanded="false">
       <span class="avatar" id="userAvatar">?</span>
       <span class="user-name" id="userName">…</span>
@@ -61,6 +61,9 @@ try {
   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="search-icon"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
   <input id="mSearchInput" type="search" placeholder="搜索课程名称 / 课程号 / 教师" autocomplete="off">
 </div>
+
+<!-- 移动端下拉刷新指示（A-06：手势与显式按钮并存） -->
+<div class="ptr" id="ptr" aria-hidden="true"><span class="ptr-ico" aria-hidden="true"></span><span class="ptr-text">下拉刷新</span></div>
 
 <div class="layout">
   <nav class="sidenav" id="sidenav" aria-label="主导航">

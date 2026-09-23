@@ -147,7 +147,7 @@ export function seatHtml(c) {
   const pct = c.capacity ? Math.round((c.remaining / c.capacity) * 100) : 0;
   return `
     <div class="seat">
-      <div class="n ${cls}" data-seat="${c.id}">${c.remaining}</div>
+      <div class="n ${cls}" data-seat="${c.id}" data-cap="${c.capacity}">${c.remaining}</div>
       <div class="c">/ ${c.capacity} 名额</div>
       <div class="seat-bar"><i class="${cls}" style="width:${pct}%"></i></div>
     </div>`;
@@ -155,12 +155,14 @@ export function seatHtml(c) {
 
 export function tagsHtml(c) {
   const out = [];
-  out.push(`<span class="tag">${esc(c.category)}</span>`);
-  if (c.remaining === 0) out.push('<span class="tag danger">已满</span>');
-  else if (c.remaining <= 8) out.push('<span class="tag warn">名额紧张</span>');
-  if (c.conflict) out.push('<span class="tag danger">时间冲突</span>');
-  if (c.selected) out.push('<span class="tag ok">已选</span>');
-  else if (c.inWishlist) out.push('<span class="tag pri">心愿单</span>');
+  /* V-05：单卡片标签不超过 3 个，按"风险优先"顺序保留，避免标签抢走一级信息（课程名/名额/时间地点）的注意力 */
+  const push = (t) => { if (out.length < 3) out.push(t); };
+  if (c.conflict) push('<span class="tag danger">时间冲突</span>');
+  if (c.remaining === 0) push('<span class="tag danger">已满</span>');
+  else if (c.remaining <= 8) push('<span class="tag warn">名额紧张</span>');
+  if (c.selected) push('<span class="tag ok">已选</span>');
+  else if (c.inWishlist) push('<span class="tag pri">心愿单</span>');
+  push(`<span class="tag">${esc(c.category)}</span>`);
   return out.join(" ");
 }
 

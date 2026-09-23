@@ -711,6 +711,40 @@ export async function renderSettings(view) {
   store.setMe(me);
   const s = store.get();
 
+  /* 登录会话身份（教师 / 教务不展示学生多账号切换） */
+  let ssn = null;
+  try { ssn = JSON.parse(localStorage.getItem("cp_session") || "null"); } catch (e) { /* 忽略 */ }
+  const ROLE_LABEL = { student: "学生端", teacher: "教师端", admin: "教务端" };
+  const isStudent = !ssn || ssn.role === "student";
+  const identityCard = `
+    <div class="card">
+      <h2 style="font-size:var(--fs-h2);margin-bottom:12px">当前登录身份</h2>
+      <div class="acct-item cur">
+        <div class="avatar">${esc((ssn && ssn.name || "?").slice(0, 1))}</div>
+        <div class="meta">
+          <div class="n">${esc(ssn && ssn.name || "—")} <span class="tag pri">${esc(ROLE_LABEL[ssn && ssn.role] || "—")}</span></div>
+          <div class="s">${esc(ssn && ssn.username || "")}</div>
+        </div>
+      </div>
+      <button class="btn" id="logoutHere" style="margin-top:12px">退出登录</button>
+    </div>`;
+  const accountCard = `
+    <div class="card">
+      <h2 style="font-size:var(--fs-h2);margin-bottom:12px">账号</h2>
+      <div id="acctList">
+        ${(me.accounts || []).map((a) => `
+          <div class="acct-item ${a.current ? "cur" : ""}">
+            <div class="avatar">${esc(a.name.slice(0, 1))}</div>
+            <div class="meta">
+              <div class="n">${esc(a.name)} ${a.current ? '<span class="tag pri">当前</span>' : ""}</div>
+              <div class="s">${esc(a.studentNo)} · ${esc(a.major)} · 已选 ${a.enrolledCount} 门</div>
+            </div>
+            ${a.current ? "" : `<button class="btn sm primary" data-switch="${esc(a.id)}">切换</button>`}
+          </div>`).join("")}
+      </div>
+      <p style="margin:8px 0 0;color:var(--tx-3);font-size:var(--fs-2)">切换账号后页面状态完全复位，各账号的已选课程、心愿单、消息互不干扰（I-09 会话隔离）。</p>
+    </div>`;
+
   view.innerHTML = `
     ${pageHead("个人中心", "偏好设置与个性化")}
     <div class="card">
@@ -743,21 +777,7 @@ export async function renderSettings(view) {
         </div>
       </div>
     </div>
-    <div class="card">
-      <h2 style="font-size:var(--fs-h2);margin-bottom:12px">账号</h2>
-      <div id="acctList">
-        ${(me.accounts || []).map((a) => `
-          <div class="acct-item ${a.current ? "cur" : ""}">
-            <div class="avatar">${esc(a.name.slice(0, 1))}</div>
-            <div class="meta">
-              <div class="n">${esc(a.name)} ${a.current ? '<span class="tag pri">当前</span>' : ""}</div>
-              <div class="s">${esc(a.studentNo)} · ${esc(a.major)} · 已选 ${a.enrolledCount} 门</div>
-            </div>
-            ${a.current ? "" : `<button class="btn sm primary" data-switch="${esc(a.id)}">切换</button>`}
-          </div>`).join("")}
-      </div>
-      <p style="margin:8px 0 0;color:var(--tx-3);font-size:var(--fs-2)">切换账号后页面状态完全复位，各账号的已选课程、心愿单、消息互不干扰（I-09 会话隔离）。</p>
-    </div>
+    ${isStudent ? accountCard + identityCard : identityCard}
     <div class="card">
       <h2 style="font-size:var(--fs-h2);margin-bottom:8px">说明</h2>
       <p style="margin:0;color:var(--tx-2);font-size:var(--fs-2)">
@@ -765,6 +785,13 @@ export async function renderSettings(view) {
         设置会实时保存到后端 <span class="mono">PUT /api/preferences</span>。
       </p>
     </div>`;
+
+  const lo = view.querySelector("#logoutHere");
+  if (lo) lo.onclick = () => {
+    try { localStorage.removeItem("cp_session"); } catch (e) { /* 忽略 */ }
+    toast("已退出登录", "正在返回登录页…", "ok", 900);
+    setTimeout(() => location.reload(), 600);
+  };
 
   const bindChips = (id, key) => {
     view.querySelector(id).addEventListener("click", async (e) => {
@@ -798,12 +825,11 @@ export async function renderArch(view) {
     <div class="card">
       <h2 style="font-size:var(--fs-h2);margin-bottom:10px">请求链路</h2>
       <div class="flow">
-        <span class="box">浏览器（前端 client/）</span><span class="arrow">→</span>
-        <span class="box mono">fetch /api/*</span><span class="arrow">→</span>
-        <span class="box">HTTP 服务（server/index.js）</span><span class="arrow">→</span>
-        <span class="box">路由（server/router.js）</span><span class="arrow">→</span>
-        <span class="box">业务（server/service.js）</span><span class="arrow">→</span>
-        <span class="box">数据（server/data.js）</span>
+        <span class="box">浏览器（前端 docs/）</span><span class="arrow">→</span>
+        <span class="box mono">api.js（进程内直调）</span><span class="arrow">→</span>
+        <span class="box">路由（js/backend/server.js）</span><span class="arrow">→</span>
+        <span class="box">业务（js/backend/service.js）</span><span class="arrow">→</span>
+        <span class="box">数据（js/backend/data.js）</span>
       </div>
     </div>
     <div class="card">

@@ -66,11 +66,55 @@ export const store = {
   setMe(m) { state.me = m; this.emit("me"); this.emit("*"); },
   setSession(s) { state.session = s; this.emit("session"); this.emit("*"); },
   setToken(t) { state.token = t; if (t) localStorage.setItem("cp_token", t); else localStorage.removeItem("cp_token"); },
+
+  /* P-08-4 / I-09 会话隔离：退出或切换账号时复位全部个人相关状态，
+   * 杜绝上一账号的已选、心愿单、名额缓存、个人化筛选残留（多账号串号是功能性缺陷，不能只清 token）。 */
+  resetVolatile() {
+    state.me = null;
+    state.session = null;
+    state.role = "student";
+    state.courses = { items: [], total: 0, credits: 0, creditLimit: 30 };
+    state.wishlist = [];
+    state.seats = new Map();
+    state.unread = 0;
+    state.openAt = null;
+    const f = state.filters;
+    f.keyword = "";
+    f.teacher = "";
+    f.days.clear();
+    f.periods.clear();
+    f.onlyNoConflict = false;
+    f.onlyAvailable = false;
+    f.sort = "default";
+    ["category", "campus", "assessment", "credits"].forEach((k) => f[k].clear());
+    this.emit("badge");
+    this.emit("*");
+  },
 };
+
+/* V-06 / P-08-2 主题解析：支持"跟随系统"，深色需在系统外观变化时同步生效 */
+export function resolveTheme(theme) {
+  if (theme === "dark") return "dark";
+  if (theme === "system") {
+    try {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } catch (e) { return "light"; }
+  }
+  return "light";
+}
+
+/* 系统外观变化时，仅当用户选择"跟随系统"才重新着色 */
+export function watchSystemTheme() {
+  try {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSys = () => { if (state.prefs.theme === "system") applyPrefs(); };
+    if (mq.addEventListener) mq.addEventListener("change", onSys); else mq.addListener(onSys);
+  } catch (e) { /* 浏览器不支持时忽略，主题仍可手动切换 */ }
+}
 
 export function applyPrefs() {
   const p = state.prefs;
-  document.documentElement.setAttribute("data-theme", p.theme === "dark" ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", resolveTheme(p.theme));
   document.documentElement.setAttribute("data-density", p.density === "compact" ? "compact" : p.density === "loose" ? "loose" : "standard");
   document.documentElement.setAttribute("data-font", ["small", "large", "xlarge"].includes(p.fontScale) ? p.fontScale : "standard");
 }

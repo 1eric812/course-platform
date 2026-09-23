@@ -59,7 +59,8 @@ const TABBAR_KEYS = ["home", "courses", "wishlist", "timetable"];
 function currentRoute() {
   const role = store.get().role;
   const h = location.hash.replace(/^#\//, "") || homeFor(role);
-  const valid = navFor(role).some((n) => n.key === h);
+  /* 个人中心对所有角色开放（教师 / 教务也需要退出登录与偏好设置入口） */
+  const valid = h === "settings" || navFor(role).some((n) => n.key === h);
   return valid ? h : homeFor(role);
 }
 
@@ -165,17 +166,21 @@ function bindSearch() {
   input.addEventListener("blur", () => setTimeout(hideSug, 150));
 }
 
-/* ---------- 当前账号（I-09） ---------- */
+/* ---------- 当前账号（I-09） ----------
+ * 静态后端的 /api/me 固定返回默认学生档案（a1），
+ * 因此这里只用它补充学籍信息，绝不覆盖登录会话确立的身份。 */
 async function loadMe() {
+  const ssn = readSession();
+  if (!ssn || ssn.role !== "student") return;   // 教师 / 教务：身份只来自登录会话
   try {
     const { data } = await api.me();
-    store.setMe(data);
     const u = data.user || {};
-    const av = document.getElementById("userAvatar");
-    const nm = document.getElementById("userName");
-    if (av) av.textContent = (u.name || "?").slice(0, 1);
-    if (nm) nm.textContent = u.name || "";
-    document.getElementById("userChip").title = `${u.name || ""} · ${u.grade || ""} ${u.major || ""}（点击进入个人中心）`;
+    if (u.name && u.name === ssn.name) {
+      // 后端档案与登录账号一致（默认演示账号），补充年级 / 专业到悬浮提示
+      store.setMe({ ...data, session: { role: "student", username: ssn.username } });
+      const chip = document.getElementById("userChip");
+      if (chip) chip.title = `${u.name || ""} · ${u.grade || ""} ${u.major || ""}（点击进入个人中心）`;
+    }
   } catch (e) { /* 忽略 */ }
 }
 
@@ -251,11 +256,11 @@ function hideLogin() {
 }
 
 function renderRoleBadge() {
-  const role = store.get().role;
+  const ssn = readSession();
   const el = document.getElementById("roleBadgeText");
-  if (el) el.textContent = ROLE_LABEL[role] || "未登录";
+  if (el) el.textContent = ssn && ROLE_LABEL[ssn.role] ? ROLE_LABEL[ssn.role] : "未登录";
   const badge = document.getElementById("roleBadge");
-  if (badge) badge.dataset.role = role;
+  if (badge) badge.dataset.role = ssn ? ssn.role : "none";
 }
 
 /* 校验三端账号密码（演示版本地比对，语义与后端 AuthService 一致） */
