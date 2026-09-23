@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
@@ -115,5 +116,37 @@ public class StudentController {
     @PostMapping("/unsubscribe")
     public Map<String, Object> unsubscribe(@RequestBody Map<String, Object> body, HttpServletRequest req) {
         return studentService.unsubscribe(Long.valueOf(String.valueOf(body.get("courseId"))), AuthContext.current(req));
+    }
+
+    /* ================= 学业闭环 ================= */
+
+    @GetMapping("/student/scores")
+    public Map<String, Object> studentScores(@RequestParam(required = false) Long semesterId, HttpServletRequest req) {
+        return studentService.studentScores(AuthContext.current(req), semesterId);
+    }
+
+    @GetMapping("/student/score-history")
+    public Map<String, Object> scoreHistory(HttpServletRequest req) {
+        return studentService.studentScoreHistory(AuthContext.current(req));
+    }
+
+    @GetMapping("/student/credits")
+    public Map<String, Object> credits(HttpServletRequest req) {
+        return studentService.studentCredits(AuthContext.current(req));
+    }
+
+    @GetMapping("/student/records")
+    public Map<String, Object> records(@RequestParam(required = false) Long semesterId, HttpServletRequest req) {
+        return studentService.records(AuthContext.current(req).getStudentId(), semesterId);
+    }
+
+    @GetMapping("/student/announcements")
+    public Map<String, Object> announcements(HttpServletRequest req) {
+        return studentService.announcements();
+    }
+
+    @GetMapping("/student/timetables")
+    public Map<String, Object> timetables(@RequestParam(required = false) Long semesterId, HttpServletRequest req) {
+        return studentService.timetables(AuthContext.current(req), semesterId);
     }
 }

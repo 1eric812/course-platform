@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -62,5 +63,40 @@ public class TeacherController {
     @PutMapping("/courses/{id}")
     public Map<String, Object> update(@PathVariable Long id, @RequestBody Map<String, Object> body, HttpServletRequest req) {
         return teacherService.updateCourse(id, body, AuthContext.current(req));
+    }
+
+    /* ================= 学业闭环 ================= */
+
+    @GetMapping("/overview")
+    public Map<String, Object> overview(HttpServletRequest req) {
+        return teacherService.overview(AuthContext.current(req));
+    }
+
+    @GetMapping("/courses/{id}/scores")
+    public Map<String, Object> courseScores(@PathVariable Long id, HttpServletRequest req) {
+        return teacherService.courseScores(AuthContext.current(req), id);
+    }
+
+    @PutMapping("/courses/{id}/scores")
+    public Map<String, Object> saveScores(@PathVariable Long id, @RequestBody Map<String, Object> body,
+                                          HttpServletRequest req) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) body.get("items");
+        return teacherService.saveScores(AuthContext.current(req), id, items);
+    }
+
+    @GetMapping("/courses/{id}/stats")
+    public Map<String, Object> courseStats(@PathVariable Long id) {
+        return teacherService.courseStats(id);
+    }
+
+    @GetMapping("/courses/{id}/failures")
+    public Map<String, Object> failList(@PathVariable Long id) {
+        return teacherService.failList(id);
+    }
+
+    @GetMapping("/timetable")
+    public Map<String, Object> teacherTimetable(HttpServletRequest req) {
+        return teacherService.teacherTimetable(AuthContext.current(req));
     }
 }

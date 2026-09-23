@@ -2,13 +2,17 @@ package com.courseplatform.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.courseplatform.entity.Course;
+import com.courseplatform.entity.CourseSchedule;
 import com.courseplatform.entity.Message;
 import com.courseplatform.entity.SeatSubscription;
 import com.courseplatform.entity.SelectionPeriod;
 import com.courseplatform.entity.SelectionRule;
 import com.courseplatform.entity.SelectionTicket;
 import com.courseplatform.entity.SelectionTicketItem;
+import com.courseplatform.entity.Semester;
+import com.courseplatform.entity.Student;
 import com.courseplatform.entity.StudentCourse;
+import com.courseplatform.entity.SysUser;
 import com.courseplatform.entity.UserPreference;
 import com.courseplatform.entity.Wishlist;
 import com.courseplatform.exception.ApiException;
@@ -61,12 +65,21 @@ public class StudentService {
     private final SelectionTicketItemMapper ticketItemMapper;
     private final ThreadPoolTaskExecutor executor;
     private final PeriodService periodService;
+    private final ScoreService scoreService;
+    private final CreditsService creditsService;
+    private final AnnouncementService announcementService;
+    private final SemesterMapper semesterMapper;
+    private final StudentMapper studentMapper;
+    private final SysUserMapper sysUserMapper;
+    private final CourseScheduleMapper scheduleMapper;
 
     public StudentService(CourseService courseService, CourseMapper courseMapper, WishlistMapper wishlistMapper,
                           StudentCourseMapper studentCourseMapper, SeatSubscriptionMapper subscriptionMapper,
                           MessageMapper messageMapper, UserPreferenceMapper prefMapper, SelectionRuleMapper ruleMapper,
                           SelectionTicketMapper ticketMapper, SelectionTicketItemMapper ticketItemMapper,
-                          PeriodService periodService) {
+                          PeriodService periodService, ScoreService scoreService, CreditsService creditsService,
+                          AnnouncementService announcementService, SemesterMapper semesterMapper,
+                          StudentMapper studentMapper, SysUserMapper sysUserMapper, CourseScheduleMapper scheduleMapper) {
         this.courseService = courseService;
         this.courseMapper = courseMapper;
         this.wishlistMapper = wishlistMapper;
@@ -78,6 +91,13 @@ public class StudentService {
         this.ticketMapper = ticketMapper;
         this.ticketItemMapper = ticketItemMapper;
         this.periodService = periodService;
+        this.scoreService = scoreService;
+        this.creditsService = creditsService;
+        this.announcementService = announcementService;
+        this.semesterMapper = semesterMapper;
+        this.studentMapper = studentMapper;
+        this.sysUserMapper = sysUserMapper;
+        this.scheduleMapper = scheduleMapper;
         this.executor = new ThreadPoolTaskExecutor();
         this.executor.setCorePoolSize(2);
         this.executor.setMaxPoolSize(4);
@@ -534,4 +554,144 @@ public class StudentService {
     }
 
     private String fmt(LocalDateTime t) { return t == null ? "" : FMT.format(t); }
+
+    /* ================= 学业闭环（成绩 / 学分 / 选课记录 / 公告 / 历史课表） ================= */
+
+    /** 学业看板：成绩单 + 历年成绩 + 学分总览 + 选课记录 + 学生档案 */
+    public Map<String, Object> studentScoreBoard(LoginUser u) {
+        Long sid = u.getStudentId();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("scores", scoreService.studentScores(sid, null).get("items"));
+        out.put("scoreHistory", scoreService.studentScoreHistory(sid).get("semesters"));
+        out.put("credits", creditsService.studentCredits(sid));
+        out.put("records", records(sid, null).get("items"));
+        Student st = studentMapper.selectById(sid);
+        if (st != null) {
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("studentNo", st.getStudentNo());
+            profile.put("name", "");
+            profile.put("major", st.getMajor());
+            profile.put("grade", st.getGrade());
+            profile.put("className", st.getClassName());
+            profile.put("college", st.getCollege());
+            profile.put("eduSystem", st.getEduSystem());
+            profile.put("enrollmentDate", st.getEnrollmentDate() == null ? null : st.getEnrollmentDate().toString());
+            profile.put("graduationDate", st.getGraduationDate() == null ? null : st.getGraduationDate().toString());
+            SysUser su = sysUserMapper.selectById(st.getUserId());
+            if (su != null) profile.put("name", su.getRealName());
+            out.put("student", profile);
+        }
+        return out;
+    }
+
+    public Map<String, Object> studentScores(LoginUser u, Long semesterId) {
+        return scoreService.studentScores(u.getStudentId(), semesterId);
+    }
+
+    public Map<String, Object> studentScoreHistory(LoginUser u) {
+        return scoreService.studentScoreHistory(u.getStudentId());
+    }
+
+    public Map<String, Object> studentCredits(LoginUser u) {
+        return creditsService.studentCredits(u.getStudentId());
+    }
+
+    /** 学生可见公告（置顶优先） */
+    public Map<String, Object> announcements() {
+        return announcementService.listPublished();
+    }
+
+    /** 选课记录（含课程名/学分/状态，可按学期过滤） */
+    public Map<String, Object> records(Long sid, Long semesterId) {
+        QueryWrapper<StudentCourse> qw = new QueryWrapper<StudentCourse>()
+                .eq("student_id", sid).ne("status", "DROPPED")
+                .orderByAsc("semester_id").orderByAsc("id");
+        if (semesterId != null) qw.eq("semester_id", semesterId);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (StudentCourse sc : studentCourseMapper.selectList(qw)) {
+            Course c = courseMapper.selectById(sc.getCourseId());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", sc.getId());
+            m.put("courseId", sc.getCourseId());
+            m.put("semesterId", sc.getSemesterId());
+            m.put("status", sc.getStatus());
+            m.put("statusText", scStatus(sc.getStatus()));
+            m.put("selectType", sc.getSelectType());
+            m.put("selectedAt", sc.getSelectedAt() == null ? "" : sc.getSelectedAt().toString().replace("T", " "));
+            if (c != null) {
+                m.put("code", c.getCode());
+                m.put("courseName", c.getName());
+                m.put("category", c.getCategory());
+                m.put("credits", c.getCredits());
+                m.put("teacherName", c.getTeacherName());
+            }
+            items.add(m);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("items", items);
+        out.put("total", items.size());
+        return out;
+    }
+
+    private String scStatus(String s) {
+        if (s == null) return "已选";
+        return switch (s) {
+            case "SELECTED" -> "已选";
+            case "STUDYING" -> "在读";
+            case "DROPPED" -> "已退";
+            case "PENDING_SCORE" -> "待录成绩";
+            case "ARCHIVED" -> "已归档";
+            default -> s;
+        };
+    }
+
+    /** 历史课表（按学期分组，含排课与课程详情） */
+    public Map<String, Object> timetables(LoginUser u, Long semesterId) {
+        Long sid = u.getStudentId();
+        List<StudentCourse> scs = studentCourseMapper.selectList(new QueryWrapper<StudentCourse>()
+                .eq("student_id", sid).ne("status", "DROPPED").orderByAsc("semester_id"));
+        if (semesterId != null) {
+            scs = scs.stream().filter(x -> semesterId.equals(x.getSemesterId())).collect(Collectors.toList());
+        }
+        Map<Long, List<Map<String, Object>>> bySem = new LinkedHashMap<>();
+        for (StudentCourse sc : scs) {
+            Course c = courseMapper.selectById(sc.getCourseId());
+            if (c == null) continue;
+            Long semId = sc.getSemesterId() == null ? -1L : sc.getSemesterId();
+            List<Map<String, Object>> list = bySem.computeIfAbsent(semId, k -> new ArrayList<>());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", c.getId());
+            m.put("code", c.getCode());
+            m.put("name", c.getName());
+            m.put("teacher", c.getTeacherName());
+            m.put("campus", c.getCampus());
+            m.put("place", c.getPlace());
+            m.put("credits", c.getCredits());
+            m.put("weeks", c.getWeeks());
+            m.put("status", sc.getStatus());
+            List<Map<String, Object>> sch = new ArrayList<>();
+            for (CourseSchedule cs : scheduleMapper.selectList(new QueryWrapper<CourseSchedule>().eq("course_id", c.getId()))) {
+                Map<String, Object> sm = new LinkedHashMap<>();
+                sm.put("day", cs.getDayOfWeek());
+                sm.put("start", cs.getStartPeriod());
+                sm.put("end", cs.getEndPeriod());
+                sm.put("place", cs.getPlace());
+                sch.add(sm);
+            }
+            m.put("schedule", sch);
+            list.add(m);
+        }
+        List<Map<String, Object>> semesters = new ArrayList<>();
+        for (Map.Entry<Long, List<Map<String, Object>>> e : bySem.entrySet()) {
+            Map<String, Object> sm = new LinkedHashMap<>();
+            sm.put("semesterId", e.getKey() < 0 ? null : e.getKey());
+            Semester sem = e.getKey() < 0 ? null : semesterMapper.selectById(e.getKey());
+            sm.put("semesterName", sem == null ? "历史学期" : sem.getName());
+            sm.put("courses", e.getValue());
+            semesters.add(sm);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("semesters", semesters);
+        return out;
+    }
 }

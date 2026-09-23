@@ -3,9 +3,17 @@ package com.courseplatform.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.courseplatform.entity.Course;
 import com.courseplatform.entity.CourseSchedule;
+import com.courseplatform.entity.Score;
+import com.courseplatform.entity.Student;
+import com.courseplatform.entity.StudentCourse;
+import com.courseplatform.entity.SysUser;
 import com.courseplatform.exception.ApiException;
 import com.courseplatform.mapper.CourseMapper;
 import com.courseplatform.mapper.CourseScheduleMapper;
+import com.courseplatform.mapper.ScoreMapper;
+import com.courseplatform.mapper.StudentCourseMapper;
+import com.courseplatform.mapper.StudentMapper;
+import com.courseplatform.mapper.SysUserMapper;
 import com.courseplatform.security.LoginUser;
 import org.springframework.stereotype.Service;
 
@@ -18,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** 教师端：档案 / 我授课课程 / 选课名单 */
+/** 教师端：档案 / 我授课课程 / 选课名单 / 授课概览 / 成绩录入 / 统计 / 课表 */
 @Service
 public class TeacherService {
 
@@ -28,13 +36,29 @@ public class TeacherService {
 
     private final CourseMapper courseMapper;
     private final CourseScheduleMapper scheduleMapper;
+    private final ScoreService scoreService;
+    private final SemesterService semesterService;
+    private final ScoreMapper scoreMapper;
+    private final StudentCourseMapper studentCourseMapper;
+    private final StudentMapper studentMapper;
+    private final SysUserMapper sysUserMapper;
 
-    public TeacherService(CourseMapper courseMapper, CourseScheduleMapper scheduleMapper) {
+    public TeacherService(CourseMapper courseMapper, CourseScheduleMapper scheduleMapper, ScoreService scoreService,
+                          SemesterService semesterService, ScoreMapper scoreMapper, StudentCourseMapper studentCourseMapper,
+                          StudentMapper studentMapper, SysUserMapper sysUserMapper) {
         this.courseMapper = courseMapper;
         this.scheduleMapper = scheduleMapper;
+        this.scoreService = scoreService;
+        this.semesterService = semesterService;
+        this.scoreMapper = scoreMapper;
+        this.studentCourseMapper = studentCourseMapper;
+        this.studentMapper = studentMapper;
+        this.sysUserMapper = sysUserMapper;
     }
 
     private List<Course> myCourses(LoginUser u) {
+        List<Course> byId = courseMapper.selectList(new QueryWrapper<Course>().eq("teacher_id", u.getTeacherId()));
+        if (byId != null && !byId.isEmpty()) return byId;
         return courseMapper.selectList(new QueryWrapper<Course>().eq("teacher_name", u.getRealName()));
     }
 
@@ -75,6 +99,8 @@ public class TeacherService {
             m.put("rating", c.getRating());
             m.put("prereq", c.getPrereqName());
             m.put("intro", c.getIntro());
+            m.put("semesterId", c.getSemesterId());
+            m.put("courseStatus", c.getCourseStatus());
             m.put("schedule", schedules(c.getId()));
             int cap = c.getCapacity() == null ? 0 : c.getCapacity();
             int enr = c.getEnrolled() == null ? 0 : c.getEnrolled();
@@ -94,6 +120,7 @@ public class TeacherService {
                     m.put("day", s.getDayOfWeek());
                     m.put("start", s.getStartPeriod());
                     m.put("end", s.getEndPeriod());
+                    m.put("place", s.getPlace());
                     return m;
                 }).collect(Collectors.toList());
     }
@@ -101,7 +128,8 @@ public class TeacherService {
     public Map<String, Object> roster(Long courseId, LoginUser u) {
         Course c = courseMapper.selectById(courseId);
         if (c == null) throw new ApiException(404, "课程不存在", null);
-        if (!c.getTeacherName().equals(u.getRealName())) throw new ApiException(403, "只能查看本人授课课程的名单", null);
+        if (!c.getTeacherName().equals(u.getRealName()) && !Long.valueOf(u.getTeacherId()).equals(c.getTeacherId()))
+            throw new ApiException(403, "只能查看本人授课课程的名单", null);
         Map<String, Object> courseInfo = new LinkedHashMap<>();
         courseInfo.put("id", c.getId());
         courseInfo.put("name", c.getName());
@@ -138,20 +166,107 @@ public class TeacherService {
             s.put("status", "已选");
             list.add(s);
         }
-        list.sort(Comparator.comparing(a -> String.valueOf(a.get("studentNo"))));
+        list.sort(Comparator.comparing(a -> String.valueOf(a.get("status"))));
         return list;
     }
 
     public Map<String, Object> updateCourse(Long courseId, Map<String, Object> patch, LoginUser u) {
         Course c = courseMapper.selectById(courseId);
         if (c == null) throw new ApiException(404, "课程不存在", null);
-        if (!c.getTeacherName().equals(u.getRealName())) throw new ApiException(403, "只能编辑本人授课的课程", null);
+        if (!c.getTeacherName().equals(u.getRealName()) && !Long.valueOf(u.getTeacherId()).equals(c.getTeacherId()))
+            throw new ApiException(403, "只能编辑本人授课的课程", null);
         if (patch.get("intro") != null) { String v = String.valueOf(patch.get("intro")).trim(); if (!v.isEmpty()) c.setIntro(v.substring(0, Math.min(v.length(), 500))); }
         if (patch.get("place") != null) { String v = String.valueOf(patch.get("place")).trim(); if (!v.isEmpty()) c.setPlace(v.substring(0, Math.min(v.length(), 60))); }
         courseMapper.updateById(c);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("course", c);
+        return out;
+    }
+
+    /* ================= 学业闭环 ================= */
+
+    /** 授课概览：本学期课程数、学时统计、待录成绩课程数 */
+    public Map<String, Object> overview(LoginUser u) {
+        List<Course> courses = myCourses(u);
+        var cur = semesterService.getCurrent();
+        Long curSem = cur == null ? null : cur.getId();
+        List<Course> termCourses = courses.stream()
+                .filter(c -> c.getSemesterId() == null || c.getSemesterId().equals(curSem))
+                .collect(Collectors.toList());
+        int totalHours = 0;
+        int termHours = 0;
+        int pending = 0;
+        for (Course c : courses) {
+            int h = c.getTotalHours() != null ? c.getTotalHours()
+                    : (c.getTheoryHours() == null ? 0 : c.getTheoryHours())
+                    + (c.getPracticeHours() == null ? 0 : c.getPracticeHours())
+                    + (c.getLabHours() == null ? 0 : c.getLabHours());
+            totalHours += h;
+            if (c.getSemesterId() == null || c.getSemesterId().equals(curSem)) termHours += h;
+            if (hasPendingScores(c.getId())) pending++;
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("courseCount", courses.size());
+        m.put("termCourseCount", termCourses.size());
+        m.put("totalHours", totalHours);
+        m.put("termHours", termHours);
+        m.put("pendingScoreCourses", pending);
+        m.put("semesterId", curSem);
+        m.put("semesterName", cur == null ? "" : cur.getName());
+        return m;
+    }
+
+    private boolean hasPendingScores(Long courseId) {
+        long enroll = studentCourseMapper.selectCount(new QueryWrapper<StudentCourse>()
+                .eq("course_id", courseId).ne("status", "DROPPED"));
+        if (enroll == 0) return false;
+        long total = scoreMapper.selectCount(new QueryWrapper<Score>().eq("course_id", courseId));
+        if (total == 0) return true;
+        return scoreMapper.selectCount(new QueryWrapper<Score>()
+                .eq("course_id", courseId).eq("status", "待录入")) > 0;
+    }
+
+    public Map<String, Object> courseScores(LoginUser u, Long courseId) {
+        return scoreService.teacherCourseScores(u.getTeacherId(), courseId);
+    }
+
+    public Map<String, Object> saveScores(LoginUser u, Long courseId, List<Map<String, Object>> items) {
+        return scoreService.teacherSaveScores(u.getTeacherId(), courseId, items);
+    }
+
+    public Map<String, Object> courseStats(Long courseId) {
+        return scoreService.courseStats(courseId);
+    }
+
+    public Map<String, Object> failList(Long courseId) {
+        return scoreService.failList(courseId);
+    }
+
+    /** 教师授课课表：JOIN course_schedule + course */
+    public Map<String, Object> teacherTimetable(LoginUser u) {
+        List<Course> courses = myCourses(u);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Course c : courses) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", c.getId());
+            m.put("code", c.getCode());
+            m.put("name", c.getName());
+            m.put("category", c.getCategory());
+            m.put("credits", c.getCredits());
+            m.put("campus", c.getCampus());
+            m.put("place", c.getPlace());
+            m.put("assessment", c.getAssessment());
+            m.put("semesterId", c.getSemesterId());
+            m.put("courseStatus", c.getCourseStatus());
+            m.put("enrolled", c.getEnrolled());
+            m.put("capacity", c.getCapacity());
+            m.put("schedule", schedules(c.getId()));
+            items.add(m);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("items", items);
+        out.put("total", items.size());
         return out;
     }
 }

@@ -80,4 +80,102 @@ public class AdminController {
     public Map<String, Object> reset() {
         return adminService.reset();
     }
+
+    /* ================= 学业闭环 ================= */
+
+    @GetMapping("/semesters")
+    public Map<String, Object> semesters() {
+        return adminService.semesters();
+    }
+
+    @PostMapping("/semesters")
+    public Map<String, Object> createSemester(@RequestBody Map<String, Object> body) {
+        return adminService.createSemester(body);
+    }
+
+    @PutMapping("/semesters/{id}")
+    public Map<String, Object> updateSemester(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return adminService.updateSemester(id, body);
+    }
+
+    @PostMapping("/semesters/{id}/archive")
+    public Map<String, Object> archiveSemester(@PathVariable Long id) {
+        return adminService.archiveSemester(id);
+    }
+
+    @GetMapping("/training-plans")
+    public Map<String, Object> trainingPlans() {
+        return adminService.trainingPlans();
+    }
+
+    @PostMapping("/training-plans")
+    public Map<String, Object> createTrainingPlan(@RequestBody Map<String, Object> body) {
+        return adminService.createTrainingPlan(body);
+    }
+
+    @PutMapping("/training-plans/{id}")
+    public Map<String, Object> updateTrainingPlan(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return adminService.updateTrainingPlan(id, body);
+    }
+
+    @GetMapping("/courses")
+    public Map<String, Object> allCourses(@RequestParam(required = false) Long semesterId,
+                                          @RequestParam(required = false) String category) {
+        return adminService.allCourses(semesterId, category);
+    }
+
+    @PostMapping("/courses")
+    public Map<String, Object> createCourse(@RequestBody Map<String, Object> body) {
+        return adminService.createCourse(body);
+    }
+
+    @PutMapping("/courses/{id}")
+    public Map<String, Object> updateCourse(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return adminService.updateCourse(id, body);
+    }
+
+    @GetMapping("/scores")
+    public Map<String, Object> scores(@RequestParam(required = false) Long semesterId,
+                                      @RequestParam(required = false) String status) {
+        return adminService.scores(semesterId, status);
+    }
+
+    @PutMapping("/scores/{id}/audit")
+    public Map<String, Object> auditScore(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        String action = body.get("action") == null ? null : String.valueOf(body.get("action"));
+        return adminService.auditScore(id, action);
+    }
+
+    @PostMapping("/credits/settle")
+    public Map<String, Object> creditsSettle(@RequestBody(required = false) Map<String, Object> body) {
+        Long semesterId = body == null || body.get("semesterId") == null ? null
+                : Long.valueOf(String.valueOf(body.get("semesterId")));
+        return adminService.creditsSettle(semesterId);
+    }
+
+    @GetMapping("/graduation")
+    public Map<String, Object> graduation() {
+        return adminService.graduation();
+    }
+
+    @GetMapping("/announcements")
+    public Map<String, Object> announcements() {
+        return adminService.announcements();
+    }
+
+    @PostMapping("/announcements")
+    public Map<String, Object> createAnnouncement(@RequestBody Map<String, Object> body) {
+        return adminService.createAnnouncement(body);
+    }
+
+    @PutMapping("/announcements/{id}")
+    public Map<String, Object> updateAnnouncement(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return adminService.updateAnnouncement(id, body);
+    }
+
+    @GetMapping("/logs")
+    public Map<String, Object> logs(@RequestParam(required = false) Integer page,
+                                    @RequestParam(required = false) Integer size) {
+        return adminService.logs(page, size);
+    }
 }
